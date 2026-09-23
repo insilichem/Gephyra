@@ -224,5 +224,68 @@ class TestVisualization(unittest.TestCase):
         os.remove(json_name)
         os.remove(out_name)
 
+class TestFixtureClustering(unittest.TestCase):
+    """
+    End-to-end check against tests/data/dummy_data.jsonl, which carries the same
+    line types the real `calculate` command emits: a metadata line, one frame
+    line per frame with atom_ids, and a trailing path_statistics line.
+
+    The fixture contains four spatial channels:
+      - [1, 2, 3]   present in all 10 frames
+      - [4, 5, 6]   present in all 10 frames
+      - [1, 7, 8] / [1, 9, 10]  the same channel occupied by two different
+        water pairs that exchange halfway through, 5 frames each
+      - [1, 11, 12] present in a single frame only
+    so a correct run merges the exchanging pair into one cluster at full
+    occupancy and discards the single-frame path.
+    """
+
+    FIXTURE = os.path.join(os.path.dirname(__file__), "data", "dummy_data.jsonl")
+
+    def test_fixture_has_full_output_schema(self):
+        import json
+        types = []
+        with open(self.FIXTURE) as f:
+            objs = [json.loads(line) for line in f if line.strip()]
+        types = [o["type"] for o in objs]
+
+        self.assertEqual(types[0], "metadata")
+        self.assertEqual(types[-1], "path_statistics")
+        self.assertIn("frame", types)
+
+        frames = [o for o in objs if o["type"] == "frame"]
+        self.assertEqual(len(frames), objs[0]["n_frames_analyzed"])
+        for p in frames[0]["paths"]:
+            for key in ("nodes", "atom_ids", "coords", "probability", "length", "avg_oo_dist"):
+                self.assertIn(key, p)
+            self.assertEqual(len(p["atom_ids"]), len(p["nodes"]))
+            self.assertEqual(p["length"], len(p["nodes"]) - 1)
+
+    def test_cluster_merges_exchange_and_drops_single_frame_noise(self):
+        import json
+        from gephyra.analysis import cluster_pathways
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as f:
+            out_name = f.name
+
+        cluster_pathways(data_file=self.FIXTURE, threshold=6.0, output_file=out_name)
+
+        with open(out_name) as f:
+            clusters = json.load(f)
+
+        # Four spatial channels, minus the single-frame one discarded after merging.
+        self.assertEqual(len(clusters), 3)
+
+        # The exchanging pair merges into one cluster of size 2 at full occupancy.
+        merged = [c for c in clusters if c["size"] == 2]
+        self.assertEqual(len(merged), 1)
+        self.assertAlmostEqual(merged[0]["occupancy"], 1.0)
+        self.assertEqual(merged[0]["max_persistence_frames"], 10)
+
+        os.remove(out_name)
+
+if __name__ == '__main__':
+    unittest.main()
+
 if __name__ == '__main__':
     unittest.main()
