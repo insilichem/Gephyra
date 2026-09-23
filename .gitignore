@@ -66,9 +66,19 @@ venv.bak/
 .vscode/
 
 # Output artifacts
+# NOTE: do not add a blanket "*.py" rule here. It silently prevents new source
+# files under src/ and tests/ from ever being staged. Generated visualization
+# scripts are matched by name or prefix instead.
 results.json
+results.jsonl
+clustered_pathways.json
 *.tcl
-*.py
-!draw_pathways.py
-!pymol_frame.py
-!pymol_density.py
+*.bild
+pathways_viz*
+cluster_medoids*.py
+network_density*.py
+frame_*.py
+
+# Test fixtures are tracked, despite the output-artifact patterns above.
+!tests/data/
+!tests/data/**
