@@ -36,8 +36,13 @@ def compute_persistence(frame_indices_sorted, total_frames, stride):
 
 def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_trigger=1000, max_paths=60000, output_file="clustered_pathways.json"):
     """
-    Reads JSONL trajectory data and performs temporal clustering to identify collective pathways
-    using a Hybrid 9D-Vector representation and frequency pre-filtering.
+    Reads JSONL trajectory data and performs temporal clustering to identify
+    collective pathways using a Hybrid 9D-Vector representation.
+
+    Every unique path topology in the input is carried into the spatial
+    clustering step; there is no pre-filter on frame count. The only frequency
+    criterion is applied after clustering, where a merged cluster present in
+    fewer than two frames is discarded.
 
     Args:
         coarse_trigger (int): Dataset size threshold. If the number of paths is less than or equal to this value, the 9D coarse screening is bypassed to maximize topological fidelity.
@@ -108,7 +113,7 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
     logger.info(f"Loaded {n_filtered} unique path topologies for spatial clustering.")
 
     if n_filtered == 0:
-        logger.info("No paths remained after frequency pre-filtering.")
+        logger.info("No paths available for clustering.")
         with open(output_file, 'w') as f:
             json.dump([], f, indent=2)
         return
@@ -248,15 +253,16 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
                 "Fréchet distances for this cluster may be dominated by length discrepancies rather than topological shape differences."
             )
 
-        # Calculate cluster occupancy using the fully merged frame set.
-        # This is Pass 2 of the two-pass min_frame_count strategy.
-        # Pass 1 (the initial pre-filter) protects memory by removing raw
-        # single-frame noise. Pass 2 applies the same threshold here, after
-        # the coarse clustering has merged frames across geometrically similar
-        # paths, so that the check reflects true thermodynamic occupancy of
-        # the spatial channel rather than exact atom-sequence recurrence.
-        # Users running --min_frame_count 1 (solvent-exchange mode) rely on
-        # this pass to discard any merged clusters that still have low occupancy.
+        # Cluster occupancy is computed from the fully merged frame set, i.e.
+        # the union of the frames of every path in the cluster. A cluster seen
+        # in fewer than two frames is discarded as thermal noise.
+        #
+        # The check is deliberately applied here, after merging, and nowhere
+        # else: no path is filtered on frame count before clustering. A single
+        # atom-index chain appearing in one frame may still be one sampling of a
+        # channel that is occupied throughout the trajectory by exchanging
+        # waters, and those permutations only come back together once the paths
+        # have been grouped geometrically. Filtering earlier would delete them.
         cluster_frames = set()
         for p in cluster_paths:
             cluster_frames.update(p['frames'])
@@ -330,12 +336,24 @@ def sanitize_csv_field(field_value):
     return field_str
 
 def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resname WAT or resname HOH",
-                 stride=1, max_depth=10, min_depth=1, prob_threshold=1e-3, cooperativity=0.92, coarse_cutoff=4.5,
-                 output_file="results.jsonl", csv_file=None, cluster=False, cluster_threshold=3.5):
+                 stride=1, max_depth=10, min_depth=1, prob_threshold=None, cooperativity=0.92, coarse_cutoff=4.5,
+                 output_file="results.jsonl", csv_file=None, cluster=False, cluster_threshold=6.0,
+                 cluster_output="clustered_pathways.json"):
     """
     Iterates over the trajectory and aggregates network pathways.
     Streams output as JSON Lines (JSONL) to prevent memory exhaustion,
     and optionally writes to CSV.
+
+    Args:
+        prob_threshold: deprecated and ignored; see traverse_network.
+        cluster: deprecated. Runs cluster_pathways inline once the trajectory
+            has been processed. Prefer the dedicated 'cluster' sub-command,
+            which can be re-run with different thresholds without repeating the
+            MD analysis.
+        cluster_threshold: Frechet threshold for the inline clustering. Matches
+            the default of the 'cluster' sub-command.
+        cluster_output: output path for the inline clustering. Matches the
+            default of the 'cluster' sub-command.
     """
     logger.info(f"Loading topology: {topo_file}")
 
@@ -392,7 +410,8 @@ def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resna
             "water_sel": water_sel,
             "stride": stride,
             "max_depth": max_depth,
-            "prob_threshold": prob_threshold,
+            "min_depth": min_depth,
+            "cooperativity": cooperativity,
             "coarse_cutoff": coarse_cutoff
         }
     }
@@ -507,6 +526,17 @@ def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resna
     logger.info(f"Results saved to {output_file}")
 
     if cluster:
-        cluster_pathways(data_file=output_file, threshold=cluster_threshold)
+        import warnings
+        warnings.warn(
+            "Running clustering inline from 'calculate' is deprecated. Use the "
+            "'gephyra cluster' sub-command instead, which takes the same "
+            "defaults and can be re-run without repeating the MD analysis.",
+            DeprecationWarning, stacklevel=2
+        )
+        cluster_pathways(
+            data_file=output_file,
+            threshold=cluster_threshold,
+            output_file=cluster_output,
+        )
 
     return None
