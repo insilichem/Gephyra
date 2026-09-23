@@ -1,31 +1,59 @@
+import importlib
 import unittest
 import sys
 from unittest.mock import MagicMock
 
-# Robust mocking to handle submodules and third-party dependencies
-mda = MagicMock()
-mda_lib = MagicMock()
-mda_lib_distances = MagicMock()
-mda_lib.distances = mda_lib_distances
-mda.lib = mda_lib
+# `gephyra.analysis` imports MDAnalysis, numpy, networkx, scipy and
+# similaritymeasures at module level, so this file has to make those names
+# importable before it can pull in compute_persistence.
+#
+# Only stand in for a dependency that is genuinely missing. Unconditionally
+# assigning mocks into sys.modules poisons the whole pytest session: every test
+# collected after this file inherits them, so any later test doing real
+# numerical work silently operates on MagicMocks and fails in ways that have
+# nothing to do with what it is testing.
+_MOCKED = {}
 
-sys.modules['MDAnalysis'] = mda
-sys.modules['MDAnalysis.lib'] = mda_lib
-sys.modules['MDAnalysis.lib.distances'] = mda_lib_distances
+def _mock_if_missing(name, configure=None):
+    if name in sys.modules:
+        return
+    try:
+        importlib.import_module(name)
+    except ImportError:
+        mock = MagicMock()
+        if configure is not None:
+            configure(mock)
+        _MOCKED[name] = mock
+        sys.modules[name] = mock
 
-numpy_mock = MagicMock()
-# Make numpy mocks behave reasonably for compute_persistence
-sys.modules['numpy'] = numpy_mock
-numpy_mock.mean.side_effect = lambda x, **kwargs: float(sum(x) / len(x)) if x else 0.0
-numpy_mock.max.side_effect = lambda x, **kwargs: int(max(x)) if x else 0
+def _configure_numpy(mock):
+    # Just enough behaviour for compute_persistence.
+    mock.mean.side_effect = lambda x, **kwargs: float(sum(x) / len(x)) if x else 0.0
+    mock.max.side_effect = lambda x, **kwargs: int(max(x)) if x else 0
 
-sys.modules['networkx'] = MagicMock()
-sys.modules['scipy'] = MagicMock()
-sys.modules['scipy.spatial'] = MagicMock()
-sys.modules['scipy.spatial.distance'] = MagicMock()
-sys.modules['scipy.cluster'] = MagicMock()
-sys.modules['scipy.cluster.hierarchy'] = MagicMock()
-sys.modules['similaritymeasures'] = MagicMock()
+for _name in (
+    "MDAnalysis",
+    "MDAnalysis.lib",
+    "MDAnalysis.lib.distances",
+    "MDAnalysis.exceptions",
+    "networkx",
+    "scipy",
+    "scipy.spatial",
+    "scipy.spatial.distance",
+    "scipy.cluster",
+    "scipy.cluster.hierarchy",
+    "similaritymeasures",
+):
+    _mock_if_missing(_name)
+
+_mock_if_missing("numpy", _configure_numpy)
+
+def tearDownModule():
+    # Leave sys.modules exactly as it was found.
+    for _name in list(_MOCKED):
+        if sys.modules.get(_name) is _MOCKED[_name]:
+            del sys.modules[_name]
+    _MOCKED.clear()
 
 # Now import the function to test
 from gephyra.analysis import compute_persistence
