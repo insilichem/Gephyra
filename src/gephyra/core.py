@@ -2,11 +2,22 @@ import re
 import logging
 import numpy as np
 import networkx as nx
+from MDAnalysis.exceptions import NoDataError
 from MDAnalysis.lib.distances import capped_distance, distance_array
 from .math_utils import calculate_hbond_probability, switching_function
 
 logger = logging.getLogger(__name__)
 
+# Fallback name -> element map, used only when the topology does not carry an
+# `element` attribute (see _get_element).
+#
+# Provenance: the O*, N* and S* entries are the CHARMM27 donor and acceptor atom
+# names that MDAnalysis ships with WaterBridgeAnalysis
+# (MDAnalysis.analysis.hydrogenbonds.wbridge_analysis, DEFAULT_DONORS /
+# DEFAULT_ACCEPTORS for the 'CHARMM27' force field). O1, O2, OW1 and OXT are
+# added by Gephyra: OXT for C-terminal carboxylates, and O1/O2/OW1 because they
+# are common in ligand and non-standard solvent topologies that the CHARMM27
+# lists do not cover.
 _NAME_TO_ELEMENT = {
     'OW': 'O', 'O1': 'O', 'O2': 'O', 'OD1': 'O', 'OD2': 'O', 'OE1': 'O', 'OE2': 'O', 'OG': 'O', 'OG1': 'O', 'OH': 'O',
     'OXT': 'O', 'OH2': 'O', 'OC1': 'O', 'OC2': 'O', 'OW1': 'O',
@@ -15,6 +26,7 @@ _NAME_TO_ELEMENT = {
 }
 
 _warned_united_atom = set()
+_warned_no_bonds = set()
 
 def _is_hydrogen(a):
     """
@@ -41,6 +53,10 @@ def _get_element(atom):
     Priority 2: Exact match in _NAME_TO_ELEMENT dictionary.
     Priority 3: Strip leading digits from atom.name and take the leading alphabetic substring.
     """
+    # Elements accepted as hydrogen-bond donors or acceptors. Every element in
+    # this set must have an explicit (r0, delta) entry in
+    # compute_edge_probabilities; otherwise it silently inherits the O-O
+    # parameters, which are wrong for the heavier elements.
     valid_elements = {"O", "N", "S", "F", "CL", "BR"}
     try:
         if atom.element:
@@ -144,9 +160,31 @@ def compute_edge_probabilities(g, u):
         if atom.index in h_cache:
             return h_cache[atom.index]
 
+        try:
+            atom_bonds = atom.bonds
+        except (NoDataError, AttributeError):
+            # The topology carries no bond records at all (a bare PDB without
+            # CONECT lines, a .gro, an .xyz ...). We cannot separate explicit
+            # hydrogens from heavy neighbours, and we cannot place virtual ones
+            # either, so return an empty list. The caller then takes the
+            # distance-only branch below (ignore_angle=True), exactly as it does
+            # for a united-atom topology.
+            if not _warned_no_bonds:
+                _warned_no_bonds.add(True)
+                logger.warning(
+                    "Topology contains no bond information, so hydrogen positions "
+                    "cannot be resolved. Falling back to a distance-only "
+                    "hydrogen-bond criterion for every edge: the angular term is "
+                    "ignored and scores will be systematically higher. Supply a "
+                    "topology with connectivity (e.g. a .tpr, .psf, or a PDB with "
+                    "CONECT records) for the full criterion."
+                )
+            h_cache[atom.index] = []
+            return []
+
         explicit_hs = []
         bonded_heavy_atoms = []
-        for bond in atom.bonds:
+        for bond in atom_bonds:
             neighbor = bond.atoms[1] if bond.atoms[0].index == atom.index else bond.atoms[0]
             if _is_hydrogen(neighbor):
                 explicit_hs.append(neighbor)
@@ -214,10 +252,35 @@ def compute_edge_probabilities(g, u):
         hs2 = get_hydrogens(a2)
         all_hs = hs1 + hs2
 
-        # Determine appropriate r0_oo based on heavy atom elements
-        if 'S' in (e1, e2):
+        # Per-pair reference distance r0 (A) and switching width delta (A).
+        #
+        # These are Gephyra's own empirical parameters. They are NOT inherited
+        # from MDAnalysis: WaterBridgeAnalysis applies a single 3.0 A
+        # donor-acceptor distance cutoff to every element pair. Here r0 sets
+        # where the distance switching function starts to decay and delta sets
+        # how far beyond r0 it reaches zero, so an edge is scored down smoothly
+        # between r0 and r0 + delta rather than being accepted or rejected at a
+        # hard cutoff. Values follow the typical heavy-atom separation of each
+        # pair, widening with the van der Waals radius of the heavier partner.
+        #
+        # Every element in _get_element's `valid_elements` needs a branch here.
+        # The halogen values are the roughest of the set: organic F in
+        # particular is a weak acceptor, and treating C-F as a full H-bond
+        # acceptor will over-report bridges. If that is not wanted for your
+        # system, drop F/CL/BR from `valid_elements` instead, which makes those
+        # edges UNKNOWN and removes them.
+        if 'BR' in (e1, e2):
+            r0_oo_fixed = 3.4
+            r0_threshold_fixed = 0.8
+        elif 'CL' in (e1, e2):
             r0_oo_fixed = 3.3
             r0_threshold_fixed = 0.8
+        elif 'S' in (e1, e2):
+            r0_oo_fixed = 3.3
+            r0_threshold_fixed = 0.8
+        elif 'F' in (e1, e2):
+            r0_oo_fixed = 2.9
+            r0_threshold_fixed = 0.5
         elif (e1, e2) in (('N', 'N'),):
             r0_oo_fixed = 3.0
             r0_threshold_fixed = 0.6
@@ -252,9 +315,25 @@ def compute_edge_probabilities(g, u):
                     r0_oo=r0_oo_fixed,
                     r0_threshold=r0_threshold_fixed
                 )
+                # Two further empirical switching terms, also Gephyra's own and
+                # not taken from MDAnalysis:
+                #   2.5 A - the H...acceptor separation at which the interaction
+                #           is taken to have vanished. Chosen as the outer edge
+                #           of the H...O distribution for a water-water bond
+                #           (which peaks near 1.8 A), so it damps long, poorly
+                #           aligned contacts that the heavy-atom term alone
+                #           would still accept.
+                #   1.1 A - the covalent D-H bond length ceiling, used to confirm
+                #           that the hydrogen really belongs to one of the two
+                #           heavy atoms rather than to a third molecule that
+                #           happens to lie between them. An X-H bond for X in
+                #           {O, N, S} is ~0.96-1.34 A, so this is deliberately
+                #           tight and is skipped entirely for virtual hydrogens.
                 p_ha = switching_function(dist_HA, threshold=2.5, power_num=6, power_den=12)
                 is_virtual_h = (a1.index in ua_atom_indices or a2.index in ua_atom_indices)
                 if is_virtual_h:
+                    # Virtual hydrogens were placed at exactly 1.0 A by
+                    # get_hydrogens, so the covalent test carries no information.
                     p_covalent = 1.0
                 else:
                     p_covalent = switching_function(dist_DH, threshold=1.1, power_num=6, power_den=12)
@@ -273,16 +352,52 @@ def compute_edge_probabilities(g, u):
 
     return g
 
-def traverse_network(g, root_indices, max_depth=5, prob_threshold=1e-3, cooperativity=0.92):
+def traverse_network(g, root_indices, max_depth=5, prob_threshold=None, cooperativity=0.92):
+    """
+    Enumerates self-avoiding paths from the root atoms outwards and groups them
+    by endpoint.
+
+    Each edge carries weight w = -log(p), so the weight of a path is the
+    negative log of the product of its bond probabilities. The k-th edge of a
+    path (k = 1 for the first edge leaving the root) is scaled by
+
+        cooperativity ** (k - 1)
+
+    before being added, which discounts each successive bond relative to the one
+    before it. This models hydrogen-bond cooperativity: polarisation propagates
+    along a water wire, so a bond that is already embedded in a chain is
+    stronger, i.e. costs less, than the same geometry in isolation. The
+    discount is geometric, so the penalty contributed by deep bonds decays and
+    long chains are not dismissed purely for being long.
+
+    cooperativity=1.0 disables the effect and recovers the plain product of edge
+    probabilities. Values below 1.0 favour longer chains; the default of 0.92 is
+    an empirical choice, not a measured constant.
+
+    Args:
+        g: graph with 'weight' on every edge, as produced by
+            compute_edge_probabilities.
+        root_indices: atom indices to start from.
+        max_depth: maximum number of waters in a path.
+        prob_threshold: deprecated and ignored. Kept only so that existing
+            callers do not break; passing anything other than None raises a
+            DeprecationWarning.
+        cooperativity: per-depth discount factor described above.
+
+    Returns:
+        A list of (path, Z) tuples, one per endpoint reached. `path` is the
+        lowest-weight route to that endpoint; Z is sum(exp(-w)) over every route
+        to it, i.e. the unbounded quantity the README calls PHquality, not a
+        probability in [0, 1].
+    """
     import heapq
     import itertools
     from collections import defaultdict
 
     pq = []
-    visited = set()
     counter = itertools.count()
 
-    if prob_threshold != 1e-3:
+    if prob_threshold is not None:
         import warnings
         warnings.warn("prob_threshold has no effect and will be removed in a future version. "
                       "Path termination is controlled solely by max_depth.",
@@ -297,11 +412,14 @@ def traverse_network(g, root_indices, max_depth=5, prob_threshold=1e-3, cooperat
     while pq:
         curr_weight, _, u_node, depth, path = heapq.heappop(pq)
 
-        state = (u_node, tuple(path))
-        if state in visited:
-            continue
-        visited.add(state)
-
+        # No memoisation here by design. A (node, path) key can never repeat,
+        # because every path is pushed exactly once and already ends at its own
+        # node, so keying on it prunes nothing while retaining every path
+        # visited so far. Keying on the node alone would be wrong: this
+        # enumerates all routes to an endpoint in order to accumulate Z, not
+        # just the best one. A correct optimisation would need a dominance test
+        # over (endpoint, remaining depth), which is left undone; the cost of
+        # the full enumeration is what makes deep --max_depth values expensive.
         if len(path) > 1:
             endpoint_groups[u_node].append((curr_weight, path))
 
