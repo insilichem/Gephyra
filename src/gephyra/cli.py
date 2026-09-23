@@ -26,16 +26,17 @@ def main():
     calc_parser.add_argument("--water", default="resname SOL or resname WAT or resname HOH", help="MDAnalysis selection string for water.")
     calc_parser.add_argument("--stride", type=int, default=1, help="Frame stride for trajectory processing.")
     calc_parser.add_argument("--max_depth", type=int, default=10, help="Maximum number of consecutive waters in a path.")
-    calc_parser.add_argument("--min_depth", type=int, default=1, help="Minimum path length to save in results.")
+    calc_parser.add_argument("--min_depth", type=int, default=1, help="Minimum number of consecutive waters in a path to save in results.")
     calc_parser.add_argument("--cooperativity", type=float, default=0.92, help="Depth-dependent cooperativity factor for hydrogen bonds.")
     calc_parser.add_argument("--coarse_cutoff", type=float, default=4.5, help="Coarse distance cutoff (Angstroms) for initial graph building.")
-    calc_parser.add_argument("--prob_threshold", type=float, default=1e-3, help="Deprecated. Has no effect. Will be removed in a future version.")
     calc_parser.add_argument("--output", default="results.jsonl", help="Output JSON Lines file for storing the raw network data.")
     calc_parser.add_argument("--csv", default=None, help="Optional output CSV file for storing human-readable summary data.")
 
     # --cluster / --cluster_threshold are kept for backward compatibility but are deprecated in favour of the dedicated 'cluster' sub-command below.
-    calc_parser.add_argument("--cluster", action="store_true", help="Enable temporal clustering of pathways post-analysis.")
-    calc_parser.add_argument("--cluster_threshold", type=float, default=3.5, help="Spatial threshold for the deprecated inline clustering.")
+    # Their defaults are kept identical to the 'cluster' sub-command so that the two routes give the same result.
+    calc_parser.add_argument("--cluster", action="store_true", help="Deprecated. Enable temporal clustering of pathways post-analysis. Prefer the 'cluster' sub-command.")
+    calc_parser.add_argument("--cluster_threshold", type=float, default=6.0, help="Deprecated. Frechet threshold for the inline clustering. Same default as 'gephyra cluster --threshold'.")
+    calc_parser.add_argument("--cluster_output", default="clustered_pathways.json", help="Deprecated. Output file for the inline clustering.")
     
     # cluster sub-command  (NEW – decoupled from 'calculate')
     cluster_parser = subparsers.add_parser("cluster", help="Cluster pathways from a finished calculation without re-running the MD analysis.",)
@@ -87,13 +88,13 @@ def main():
             stride=args.stride,
             max_depth=args.max_depth,
             min_depth=args.min_depth,
-            prob_threshold=args.prob_threshold,
             cooperativity=args.cooperativity,
             coarse_cutoff=args.coarse_cutoff,
             output_file=args.output,
             csv_file=args.csv,
             cluster=args.cluster,
-            cluster_threshold=args.cluster_threshold
+            cluster_threshold=args.cluster_threshold,
+            cluster_output=args.cluster_output
         )
 
     elif args.command == "cluster":
