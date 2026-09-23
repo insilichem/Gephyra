@@ -16,7 +16,8 @@ dependencies = [
     "MDAnalysis>=2.0.0",
     "networkx>=2.0",
     "numpy>=1.20.0",
-    "scipy>=1.5.0"
+    "scipy>=1.5.0",
+    "similaritymeasures>=0.4.4"
 ]
 
 [project.scripts]
