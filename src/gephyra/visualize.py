@@ -22,6 +22,46 @@ def read_jsonl(data_file):
                 frames[f_idx].extend(obj['paths'])
     return frames
 
+def _bild_path(output_file):
+    """BILD geometry file that accompanies a Chimera script: same stem, .bild suffix."""
+    return os.path.abspath(os.path.splitext(output_file)[0] + ".bild")
+
+def _resolve_frame(frames, frame_idx):
+    """
+    Returns the key of the frame to draw, or None if there are no frames.
+
+    A requested frame that is not in the data (e.g. skipped by --stride) falls
+    back to the first available frame with a warning, rather than silently.
+    """
+    if not frames:
+        return None
+    if frame_idx is not None and str(frame_idx) in frames:
+        return str(frame_idx)
+    first = next(iter(frames))
+    if frame_idx is not None:
+        available = sorted(int(k) for k in frames)
+        preview = ", ".join(str(k) for k in available[:10]) + (", ..." if len(available) > 10 else "")
+        logger.warning(f"Frame {frame_idx} not found in data (available: {preview}). Using frame {first} instead.")
+    return first
+
+def detect_data_kind(data_file):
+    """
+    'cluster' for a clustered_pathways.json (a JSON array), 'jsonl' for the
+    line-delimited output of `calculate`, or None if it cannot be told apart.
+    """
+    with open(data_file, 'r') as f:
+        while True:
+            ch = f.read(1)
+            if not ch:
+                return None
+            if not ch.isspace():
+                break
+    if ch == '[':
+        return 'cluster'
+    if ch == '{':
+        return 'jsonl'
+    return None
+
 def export_vmd_script(data_file, output_file="draw_pathways.tcl", mode="frame", frame_idx=None, cluster_id=None, max_bond_draw_dist=6.0):
     """
     Generates a Tcl script to visualize the network in VMD using dynamic selections.
@@ -30,8 +70,7 @@ def export_vmd_script(data_file, output_file="draw_pathways.tcl", mode="frame", 
         frames = read_jsonl(data_file)
         
     if mode == "frame":
-        if frame_idx is None or str(frame_idx) not in frames:
-            frame_idx = list(frames.keys())[0] if frames else None
+        frame_idx = _resolve_frame(frames, frame_idx)
 
         if frame_idx is None:
             logger.error("No frames available for visualization.")
@@ -44,7 +83,7 @@ def export_vmd_script(data_file, output_file="draw_pathways.tcl", mode="frame", 
         for path in paths:
             all_indices.update(path["nodes"])
 
-        indices_str = " ".join(str(i) for i in all_indices)
+        indices_str = " ".join(str(i) for i in sorted(all_indices))
 
         if not indices_str:
             logger.warning(f"No paths found for frame {frame_idx}. Skipping VMD script generation to prevent Tcl crash.")
@@ -155,8 +194,7 @@ def export_pymol_script(data_file, output_file="draw_pathways.py", mode="frame",
             f.write(f"obj.extend([SPHERE, {p[0]:.3f}, {p[1]:.3f}, {p[2]:.3f}, {radius:.3f}])\n")
 
         if mode == "frame":
-            if frame_idx is None or str(frame_idx) not in frames:
-                frame_idx = list(frames.keys())[0] if frames else None
+            frame_idx = _resolve_frame(frames, frame_idx)
 
             if frame_idx is None:
                 logger.error("No frames available for visualization.")
@@ -226,8 +264,7 @@ def export_chimera_script(data_file, output_file="draw_pathways.py", mode="frame
         frames = read_jsonl(data_file)
 
     if mode == "frame":
-        if frame_idx is None or str(frame_idx) not in frames:
-            frame_idx = list(frames.keys())[0] if frames else None
+        frame_idx = _resolve_frame(frames, frame_idx)
 
         if frame_idx is None:
             logger.error("No frames available for visualization.")
@@ -243,7 +280,7 @@ def export_chimera_script(data_file, output_file="draw_pathways.py", mode="frame
             else:
                 all_ids.update(i+1 for i in path["nodes"])
 
-        bild_file = os.path.abspath(output_file.replace('.py', '.bild'))
+        bild_file = _bild_path(output_file)
         with open(bild_file, 'w') as bild_f:
             bild_f.write('.color orange\n')
             for path in paths:
@@ -281,7 +318,7 @@ def export_chimera_script(data_file, output_file="draw_pathways.py", mode="frame
         logger.info(f"Chimera script written to {output_file} for frame {frame_idx} (BILD geometry: {bild_file})")
 
     elif mode == "density":
-        bild_file = os.path.abspath(output_file.replace('.py', '.bild'))
+        bild_file = _bild_path(output_file)
         with open(bild_file, 'w') as bild_f:
             bild_f.write('.color cyan\n')
             
@@ -311,7 +348,7 @@ def export_chimera_script(data_file, output_file="draw_pathways.py", mode="frame
                 logger.warning(f"Cluster ID {cluster_id} not found in data.")
                 return
 
-        bild_file = os.path.abspath(output_file.replace('.py', '.bild'))
+        bild_file = _bild_path(output_file)
         with open(bild_file, 'w') as bild_f:
             bild_f.write('.color orange\n')
 
@@ -347,6 +384,19 @@ def export_chimera_script(data_file, output_file="draw_pathways.py", mode="frame
 def run_visualization(data_file, format="vmd", mode="density", frame_idx=None, cluster_id=None, output_file="pathways_viz", max_bond_draw_dist=6.0):
     if not os.path.exists(data_file):
         logger.error(f"Data file {data_file} not found.")
+        return
+
+    # Catch the most common mistake (passing results.jsonl to --mode cluster,
+    # or clustered_pathways.json to density/frame) with an actionable message
+    # instead of a JSON decode traceback or an empty script.
+    kind = detect_data_kind(data_file)
+    if mode == "cluster" and kind == "jsonl":
+        logger.error(f"--mode cluster expects the JSON written by 'gephyra cluster', but {data_file} "
+                     "looks like the .jsonl written by 'gephyra calculate'. Run 'gephyra cluster' first.")
+        return
+    if mode in ("frame", "density") and kind == "cluster":
+        logger.error(f"--mode {mode} expects the .jsonl written by 'gephyra calculate', but {data_file} "
+                     "looks like a clustered_pathways.json. Use --mode cluster for that file.")
         return
 
     # Append appropriate extension based on format if not provided by user

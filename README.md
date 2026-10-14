@@ -66,11 +66,19 @@ Requires Python 3.8 or higher.
 # Standard install from repository root
 pip install .
 
-# Development (editable) install
-pip install -e .
+# Development (editable) install, with test dependencies
+pip install -e ".[test]"
 ```
 
+Run the test suite with `pytest` (or `python -m unittest discover -s tests`).
+
 ## Usage
+
+Global options go before the sub-command: `gephyra --version`, `gephyra -v …`
+(debug logging) and `gephyra -q …` (warnings and errors only). Numerical
+arguments are validated up front: for example, `--stride 0`, a `--cooperativity`
+outside (0, 1], or a `--min_depth` larger than `--max_depth` are rejected before
+any trajectory is loaded. `python -m gephyra` is equivalent to `gephyra`.
 
 ### 1. Calculate
 
@@ -115,11 +123,20 @@ gephyra cluster \
 | Option | Default | Description |
 |---|---|---|
 | `--data` | required | The `.jsonl` file produced by `calculate`. |
-| `--threshold` | `6.0` | Fréchet distance threshold in Å for fine clustering. |
+| `--threshold` | `6.0` | Discrete Fréchet distance threshold in Å for fine clustering. |
 | `--coarse_trigger` | `1000` | Number of paths below which the 9D coarse filter is bypassed for direct Fréchet calculation. |
 | `--coarse_threshold` | `threshold / sqrt(3)` | 9D Feature Vector distance threshold in Å for the coarse screening pass. |
 | `--max_paths` | `60000` | Hard cap on number of paths sent to the distance matrix. |
 | `--output` | `clustered_pathways.json` | Output JSON file for the cluster summary. |
+
+The Fréchet matrix is computed with a vectorised implementation of the
+Eiter–Mannila discrete Fréchet recurrence (`gephyra.math_utils.pairwise_discrete_frechet`).
+It returns exactly the same values as `similaritymeasures.frechet_dist` but
+processes all pairs with the same pair of path lengths in one NumPy pass, which
+is one to two orders of magnitude faster. Medoids are read straight from the
+condensed distance vector, so memory use is `8 · N(N−1)/2` bytes rather than
+twice that for a full square matrix. The rule that a cluster must span at least
+two frames is applied uniformly, including when only one path topology remains.
 
 ### 2. Visualize
 
@@ -155,10 +172,10 @@ gephyra visualize \
 
 | Option | Default | Description |
 |---|---|---|
-| `--data` | required | Input file. `--mode cluster` expects the `clustered_pathways.json` written by `cluster`; `--mode density` and `--mode frame` expect the `.jsonl` written by `calculate`. Passing the wrong one for the mode will not produce a useful script. |
+| `--data` | required | Input file. `--mode cluster` expects the `clustered_pathways.json` written by `cluster`; `--mode density` and `--mode frame` expect the `.jsonl` written by `calculate`. Passing the wrong one for the mode is detected and reported as an error. |
 | `--format` | `vmd` | `vmd`, `pymol`, or `chimera`. |
 | `--mode` | `density` | `density` (all frames overlaid), `frame` (single frame), or `cluster` (clustered medoids). |
-| `--frame` | — | Frame index to visualize; required when `--mode frame`. |
+| `--frame` | — | Trajectory frame index to visualize with `--mode frame`. If omitted, or not present in the data (e.g. skipped by `--stride`), the first stored frame is used and a warning is logged. |
 | `--cluster_id` | — | Specific cluster ID to visualize by its sequential rank (only applies when `--mode cluster`). |
 | `--max_bond_draw_dist` | `6.0` | Maximum Euclidean distance in Å between two connected path atoms before the segment is treated as a periodic-boundary artifact and skipped. Should sit slightly above your `--coarse_cutoff`; the default is safe for the default cutoff of 4.5 Å. |
 | `--output` | `pathways_viz` | Output script filename or prefix. |

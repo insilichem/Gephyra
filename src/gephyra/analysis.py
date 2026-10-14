@@ -1,12 +1,13 @@
+import contextlib
 import json
 import logging
 import csv
-import sys
 import copy
 import MDAnalysis as mda
 import numpy as np
 
 from .core import build_graph, compute_edge_probabilities, traverse_network
+from .math_utils import pairwise_discrete_frechet, condensed_submatrix
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,9 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
     logger.info("Starting temporal clustering of pathways...")
     import scipy.spatial.distance as ssd
     from scipy.cluster.hierarchy import linkage, fcluster
-    import similaritymeasures
+
+    if threshold <= 0:
+        raise ValueError(f"threshold must be positive, got {threshold}.")
 
     unique_paths = {}
     total_frames = 0
@@ -75,16 +78,20 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
                     if nodes_tuple not in unique_paths:
                         unique_paths[nodes_tuple] = {
                             'frames': set(),
-                            'probs': [],
+                            'prob_sum': 0.0,
+                            'count': 0,
                             'coords': coords.tolist(), # Keep one full sequence for medoid
-                            '9d_vectors': []
+                            '9d_sum': np.zeros(9)
                         }
 
-                    unique_paths[nodes_tuple]['frames'].add(frame_idx)
-                    unique_paths[nodes_tuple]['probs'].append(p['probability'])
-
-                    vector_9d = np.concatenate([coords[0], coords[len(coords)//2], coords[-1]])
-                    unique_paths[nodes_tuple]['9d_vectors'].append(vector_9d)
+                    # Running sums instead of per-occurrence lists: only the
+                    # means are ever used, and a long trajectory can contain
+                    # the same path in tens of thousands of frames.
+                    entry = unique_paths[nodes_tuple]
+                    entry['frames'].add(frame_idx)
+                    entry['prob_sum'] += p['probability']
+                    entry['count'] += 1
+                    entry['9d_sum'] += np.concatenate([coords[0], coords[len(coords)//2], coords[-1]])
 
     if total_frames == 0:
         total_frames = len(frame_set)
@@ -98,8 +105,8 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
     # Build candidate list — all unique paths proceed to spatial clustering.
     filtered_paths = []
     for nodes, data in unique_paths.items():
-        avg_prob = np.mean(data['probs'])
-        avg_9d = np.mean(data['9d_vectors'], axis=0)
+        avg_prob = data['prob_sum'] / data['count']
+        avg_9d = data['9d_sum'] / data['count']
         filtered_paths.append({
             'nodes': nodes,
             'frames': data['frames'],
@@ -180,15 +187,18 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
     if n_filtered == 1:
         logger.info("Only 1 unique path remaining. Bypassing clustering and exporting directly.")
 
-        frames_val = filtered_paths[0].get('frames', [-1])
-        medoid_frame = int(min(frames_val))
+        frames_val = filtered_paths[0]['frames']
 
-        # Calculate persistence
-        if frames_val and frames_val != [-1]:
-            sorted_frames = sorted(list(frames_val))
-            mean_pers, max_pers = compute_persistence(sorted_frames, total_frames, stride)
-        else:
-            mean_pers, max_pers = 0.0, 0
+        # Same stability rule as the multi-path branch below: a channel seen in
+        # fewer than two frames is thermal noise.
+        if len(frames_val) < 2:
+            logger.info("The only remaining path occurs in fewer than 2 frames; discarded as thermal noise.")
+            with open(output_file, 'w') as f:
+                json.dump([], f, indent=2)
+            return
+
+        medoid_frame = int(min(frames_val))
+        mean_pers, max_pers = compute_persistence(sorted(frames_val), total_frames, stride)
 
         clusters_data = [{
             "cluster_id": 1,
@@ -206,27 +216,20 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
 
     logger.info(f"Computing Fréchet distance matrix for {n_filtered} unique pathways...")
 
-    # Pre-convert coordinates to a list of numpy arrays to avoid doing it O(N^2) times
-    all_coords = [np.array(p['coords']) for p in filtered_paths]
+    n = n_filtered
+    next_log = [0.10]
 
-    n = len(all_coords)
-    condensed_dist = []
-    total_pairs = n * (n - 1) // 2
-    pairs_computed = 0
-    next_log_threshold = 0.10 # 10%
+    def _log_progress(done, total):
+        while done / total >= next_log[0] and next_log[0] <= 1.0:
+            logger.info(f"Fréchet matrix calculation: {int(round(next_log[0] * 100))}% complete...")
+            next_log[0] += 0.10
 
-    for i in range(n):
-        for j in range(i + 1, n):
-            dist = similaritymeasures.frechet_dist(all_coords[i], all_coords[j])
-            condensed_dist.append(dist)
-            pairs_computed += 1
-
-            progress = pairs_computed / total_pairs
-            if progress >= next_log_threshold:
-                logger.info(f"Fréchet matrix calculation: {int(next_log_threshold * 100)}% complete...")
-                next_log_threshold += 0.10
-
-    dist_matrix = np.array(condensed_dist)
+    # Discrete Fréchet distance (Eiter-Mannila), vectorised over pairs of equal
+    # length combination. Numerically identical to similaritymeasures.frechet_dist.
+    dist_matrix = pairwise_discrete_frechet(
+        [p['coords'] for p in filtered_paths],
+        progress_callback=_log_progress,
+    )
 
     logger.info("Performing hierarchical average-link clustering...")
     Z = linkage(dist_matrix, method='average')
@@ -235,9 +238,6 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
     unique_labels = set(labels)
     n_clusters = len(unique_labels)
     logger.info(f"Identified {n_clusters} unique collective pathways.")
-
-    # Pre-compute square distance matrix for fast medoid lookups
-    square_dist_matrix = ssd.squareform(dist_matrix)
 
     clusters_data = []
 
@@ -281,7 +281,9 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
 
         # Medoid calculation
         # Extract the sub-matrix of distances between elements in this cluster
-        cluster_dist_submatrix = square_dist_matrix[np.ix_(cluster_indices, cluster_indices)]
+        # (read straight from the condensed vector; a full n x n square copy
+        # would need 8*n^2 bytes, i.e. ~29 GB at the default max_paths cap)
+        cluster_dist_submatrix = condensed_submatrix(dist_matrix, n, cluster_indices)
 
         # Sum distances for each path to all other paths in the cluster
         sum_distances = np.sum(cluster_dist_submatrix, axis=1)
@@ -291,15 +293,8 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
         medoid_path = cluster_paths[medoid_local_idx]
         medoid_coords = medoid_path['coords']
 
-        frames_val = medoid_path.get('frames', [-1])
-        medoid_frame = int(min(frames_val))
-
-        # Calculate persistence
-        if cluster_frames and cluster_frames != [-1]:
-            sorted_frames = sorted(list(cluster_frames))
-            mean_pers, max_pers = compute_persistence(sorted_frames, total_frames, stride)
-        else:
-            mean_pers, max_pers = 0.0, 0
+        medoid_frame = int(min(medoid_path['frames']))
+        mean_pers, max_pers = compute_persistence(sorted(cluster_frames), total_frames, stride)
 
         clusters_data.append({
             "cluster_id": int(label),
@@ -323,6 +318,25 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
         json.dump(clusters_data, f, indent=2)
 
     logger.info(f"Clustering complete. Results saved to {output_file}")
+
+
+def validate_calculation_parameters(stride=1, max_depth=10, min_depth=1, cooperativity=0.92, coarse_cutoff=4.5):
+    """
+    Raises ValueError with an actionable message for out-of-range parameters,
+    before any trajectory is loaded.
+    """
+    if stride < 1:
+        raise ValueError(f"stride must be >= 1, got {stride}.")
+    if max_depth < 1:
+        raise ValueError(f"max_depth must be >= 1, got {max_depth}.")
+    if min_depth < 1:
+        raise ValueError(f"min_depth must be >= 1, got {min_depth}.")
+    if min_depth > max_depth:
+        raise ValueError(f"min_depth ({min_depth}) cannot exceed max_depth ({max_depth}); no path could ever be written.")
+    if not 0.0 < cooperativity <= 1.0:
+        raise ValueError(f"cooperativity must be in (0, 1], got {cooperativity}.")
+    if coarse_cutoff <= 0:
+        raise ValueError(f"coarse_cutoff must be positive, got {coarse_cutoff}.")
 
 
 def sanitize_csv_field(field_value):
@@ -354,7 +368,14 @@ def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resna
             the default of the 'cluster' sub-command.
         cluster_output: output path for the inline clustering. Matches the
             default of the 'cluster' sub-command.
+
+    Raises:
+        ValueError: if a numerical parameter is out of range or the root
+            selection matches no atoms.
     """
+    validate_calculation_parameters(stride=stride, max_depth=max_depth, min_depth=min_depth,
+                                    cooperativity=cooperativity, coarse_cutoff=coarse_cutoff)
+
     logger.info(f"Loading topology: {topo_file}")
 
     # Load universe
@@ -381,25 +402,86 @@ def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resna
     root_atoms = u.select_atoms(root_sel)
 
     if len(root_atoms) == 0:
-        logger.error(f"Error: Root selection '{root_sel}' returned no atoms. Check your resname/resid.")
-        sys.exit(1)
+        raise ValueError(f"Root selection '{root_sel}' returned no atoms. Check your resname/resid.")
 
-    # Global stats
-    total_length_sum = 0
-    total_prob_sum = 0
-    total_paths = 0
-    found_large_path = False
+    if len(water_atoms) == 0:
+        logger.warning(
+            f"Water selection '{water_sel}' returned no atoms; no paths can be found. "
+            "Check the solvent residue names in your topology (see --water)."
+        )
 
     path_frequency = {}
 
-    out_f = open(output_file, 'w')
+    with contextlib.ExitStack() as stack:
+        out_f = stack.enter_context(open(output_file, 'w'))
+        csv_writer = None
+        if csv_file:
+            csv_f = stack.enter_context(open(csv_file, 'w', newline=''))
+            csv_writer = csv.writer(csv_f)
+            csv_writer.writerow(["Frame", "Root_Residue", "Path_Atom_Indices", "Path_Length", "Cumulative_Probability", "Average_OO_Distance"])
 
-    csv_f = None
-    csv_writer = None
+        found_large_path, total_paths, total_discarded, total_length_sum, total_prob_sum = _process_trajectory(
+            u, water_atoms, root_atoms, out_f, csv_writer, path_frequency,
+            root_sel=root_sel, water_sel=water_sel, stride=stride, max_depth=max_depth,
+            min_depth=min_depth, prob_threshold=prob_threshold, cooperativity=cooperativity,
+            coarse_cutoff=coarse_cutoff, total_processed=total_processed,
+        )
+
     if csv_file:
-        csv_f = open(csv_file, 'w', newline='')
-        csv_writer = csv.writer(csv_f)
-        csv_writer.writerow(["Frame", "Root_Residue", "Path_Atom_Indices", "Path_Length", "Cumulative_Probability", "Average_OO_Distance"])
+        logger.info(f"CSV saved to {csv_file}")
+
+    # Check threshold notification
+    if max_depth >= 8 and not found_large_path:
+        notice_msg = "Notice: No water-bridges larger than 8 layers were detected in this analysis."
+        logger.info(notice_msg)
+        with open(output_file, 'a') as f:
+            f.write(json.dumps({"type": "notice", "message": notice_msg}) + '\n')
+
+    avg_length = float(total_length_sum) / total_paths if total_paths > 0 else 0.0
+    avg_prob = float(total_prob_sum) / total_paths if total_paths > 0 else 0.0
+
+    logger.info("=== Analysis Complete ===")
+    logger.info(f"Total paths written across analyzed frames: {total_paths}")
+    if total_discarded:
+        logger.info(f"Paths discarded by --min_depth {min_depth}: {total_discarded}")
+    logger.info(f"Average path length (depth): {avg_length:.2f}")
+    logger.info(f"Average PHquality (Z): {avg_prob:.4f}")
+    logger.info(f"Results saved to {output_file}")
+
+    if cluster:
+        import warnings
+        warnings.warn(
+            "Running clustering inline from 'calculate' is deprecated. Use the "
+            "'gephyra cluster' sub-command instead, which takes the same "
+            "defaults and can be re-run without repeating the MD analysis.",
+            DeprecationWarning, stacklevel=2
+        )
+        cluster_pathways(
+            data_file=output_file,
+            threshold=cluster_threshold,
+            output_file=cluster_output,
+        )
+
+    return None
+
+
+def _process_trajectory(u, water_atoms, root_atoms, out_f, csv_writer, path_frequency, *,
+                        root_sel, water_sel, stride, max_depth, min_depth, prob_threshold,
+                        cooperativity, coarse_cutoff, total_processed):
+    """
+    Frame loop of run_analysis: writes the metadata line, one line per frame
+    and the trailing path_statistics line to `out_f`.
+
+    Returns (found_large_path, total_paths, total_discarded, total_length_sum,
+    total_prob_sum). `total_paths` counts only the paths actually written, i.e.
+    after the --min_depth filter, so averages derived from these totals refer
+    to the same population as the output file.
+    """
+    total_length_sum = 0
+    total_prob_sum = 0
+    total_paths = 0
+    total_discarded = 0
+    found_large_path = False
 
     # Metadata as the first line of JSONL
     metadata = {
@@ -430,18 +512,18 @@ def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resna
         # 3. Traverse
         paths = traverse_network(g, root_indices, max_depth=max_depth, prob_threshold=prob_threshold, cooperativity=cooperativity)
 
-        total_paths += len(paths)
-
         frame_paths_data = []
         for path_indices, z_total in paths:
             path_len = len(path_indices) - 1
 
             if path_len < min_depth:
+                total_discarded += 1
                 continue
 
             if path_len >= 8:
                 found_large_path = True
 
+            total_paths += 1
             total_length_sum += path_len
             total_prob_sum += z_total
 
@@ -504,39 +586,4 @@ def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resna
     }
     out_f.write(json.dumps(path_stats_obj) + '\n')
 
-    out_f.close()
-    # Check threshold notification
-    if max_depth >= 8 and not found_large_path:
-        notice_msg = "Notice: No water-bridges larger than 8 layers were detected in this analysis."
-        logger.info(notice_msg)
-        with open(output_file, 'a') as f:
-            f.write(json.dumps({"type": "notice", "message": notice_msg}) + '\n')
-
-    if csv_f:
-        csv_f.close()
-        logger.info(f"CSV saved to {csv_file}")
-
-    avg_length = float(total_length_sum) / total_paths if total_paths > 0 else 0.0
-    avg_prob = float(total_prob_sum) / total_paths if total_paths > 0 else 0.0
-
-    logger.info("=== Analysis Complete ===")
-    logger.info(f"Total paths found across analyzed frames: {total_paths}")
-    logger.info(f"Average path length (depth): {avg_length:.2f}")
-    logger.info(f"Average cumulative probability: {avg_prob:.4f}")
-    logger.info(f"Results saved to {output_file}")
-
-    if cluster:
-        import warnings
-        warnings.warn(
-            "Running clustering inline from 'calculate' is deprecated. Use the "
-            "'gephyra cluster' sub-command instead, which takes the same "
-            "defaults and can be re-run without repeating the MD analysis.",
-            DeprecationWarning, stacklevel=2
-        )
-        cluster_pathways(
-            data_file=output_file,
-            threshold=cluster_threshold,
-            output_file=cluster_output,
-        )
-
-    return None
+    return found_large_path, total_paths, total_discarded, total_length_sum, total_prob_sum
