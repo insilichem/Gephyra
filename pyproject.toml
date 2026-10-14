@@ -31,6 +31,7 @@ Homepage = "https://github.com/insilichem/Gephyra"
 
 [project.scripts]
 gephyra = "gephyra.cli:main"
+gephyra-gui = "gephyra.gui:main"
 
 [tool.setuptools.dynamic]
 version = {attr = "gephyra._version.__version__"}

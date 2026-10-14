@@ -4,7 +4,7 @@ import sys
 
 from ._version import __version__
 from .analysis import run_analysis, cluster_pathways
-from .visualize import run_visualization
+from .visualize import run_visualization, validate_chimerax_model, VISUALIZE_FORMATS, VISUALIZE_MODES
 
 logger = logging.getLogger("gephyra")
 
@@ -38,6 +38,12 @@ def _cooperativity(value):
     if fvalue > 1.0:
         raise argparse.ArgumentTypeError(f"must be in (0, 1], got {fvalue}")
     return fvalue
+
+def _chimerax_model(value):
+    try:
+        return validate_chimerax_model(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc))
 
 def build_parser():
     parser = argparse.ArgumentParser(prog="gephyra", description="Gephyra: A network-graph and Fréchet clustering framework for water network detection.")
@@ -95,16 +101,24 @@ def build_parser():
     # --- Visualize Subcommand ---
     vis_parser = subparsers.add_parser("visualize", help="Generate visualization scripts from calculation results.")
     vis_parser.add_argument("--data", required=True, help="Input file: the .jsonl from 'calculate' for --mode density/frame, or the JSON from 'cluster' for --mode cluster.")
-    vis_parser.add_argument("--format", choices=["vmd", "pymol", "chimera"], default="vmd", help="Target visualization software.")
-    vis_parser.add_argument("--mode", choices=["density", "frame", "cluster"], default="density", help="Visualization mode: 'density' (all frames), 'frame' (single frame), or 'cluster' (clustered medoids).")
+    vis_parser.add_argument("--format", choices=VISUALIZE_FORMATS, default="vmd",
+        help="Target visualization software: vmd (.tcl), pymol (.py), chimera (legacy UCSF Chimera, .py + .bild) "
+             "or chimerax (UCSF ChimeraX, .cxc + .bild, plus .pb pseudobonds in frame mode).")
+    vis_parser.add_argument("--mode", choices=VISUALIZE_MODES, default="density", help="Visualization mode: 'density' (all frames), 'frame' (single frame), or 'cluster' (clustered medoids).")
     vis_parser.add_argument("--frame", type=int, default=None, help="Frame index to visualize (only used if mode='frame').")
     vis_parser.add_argument("--cluster_id", type=int, default=None, help="Specific cluster ID to visualize (only used if mode='cluster'). If None, visualizes all clusters.")
     vis_parser.add_argument("--output", default="pathways_viz", help="Output script file name or prefix.")
+    vis_parser.add_argument("--chimerax_model", type=_chimerax_model, default="#1",
+        help="ChimeraX model holding your structure (only used with --format chimerax). Atom "
+             "selections and pseudobonds are scoped to it. Default: #1, the first model opened.")
     vis_parser.add_argument("--max_bond_draw_dist", type=_positive_float, default=6.0,
         help="Maximum Euclidean distance (Å) between two connected path atoms "
              "before the cylinder is treated as a PBC artifact and skipped. "
              "Should be slightly larger than your --coarse_cutoff value. "
              "Default: 6.0 Å (safe for the default coarse_cutoff of 4.5 Å).")
+
+    # --- GUI Subcommand ---
+    subparsers.add_parser("gui", help="Open the graphical interface (tkinter) for the whole workflow.")
 
     return parser
 
@@ -123,6 +137,10 @@ def main(argv=None):
         parser.error(f"--min_depth ({args.min_depth}) cannot exceed --max_depth ({args.max_depth}).")
     if args.command == "visualize" and args.mode == "frame" and args.frame is None:
         logger.warning("--mode frame given without --frame; the first frame in the data will be drawn.")
+
+    if args.command == "gui":
+        from .gui import main as gui_main
+        return gui_main()
 
     try:
         _dispatch(args)
@@ -169,6 +187,7 @@ def _dispatch(args):
             cluster_id=args.cluster_id,
             output_file=args.output,
             max_bond_draw_dist=args.max_bond_draw_dist,
+            **({"chimerax_model": args.chimerax_model} if args.format == "chimerax" else {}),
         )
 
 if __name__ == "__main__":

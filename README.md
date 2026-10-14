@@ -56,7 +56,12 @@ Gephyra (derived from the Ancient Greek word for "bridge") is a network-graph an
     high-level collective behaviours.
   - **Phase 2 — `visualize`:** Parses `.jsonl` output and generates
     ready-to-run scripts for PyMOL (CGO cylinders), VMD (Tcl atom
-    index selection), and UCSF Chimera (`.py` / `.bild`).
+    index selection), UCSF Chimera (`.py` / `.bild`) and UCSF ChimeraX
+    (`.cxc` / `.bild` / `.pb`).
+
+- **Graphical interface:** `gephyra gui` opens a desktop window with one tab
+  per phase, file pickers, validated inputs, live logs and progress, so the
+  whole workflow can be run without memorising command-line flags.
 
 ## Installation
 
@@ -71,6 +76,44 @@ pip install -e ".[test]"
 ```
 
 Run the test suite with `pytest` (or `python -m unittest discover -s tests`).
+Interface tests need a display and are skipped without one (`xvfb-run pytest`
+runs them headless). Set `GEPHYRA_TEST_CHIMERAX=1` with `chimerax` on your
+`PATH` to also open the generated ChimeraX scripts in a real, windowless
+ChimeraX session.
+
+## Graphical interface
+
+```bash
+gephyra gui        # or: gephyra-gui
+```
+
+The window has one tab per phase: **1. Pathway Analysis**, **2. Clustering**
+and **3. Visualization**. Every option from the command line is a form field
+with the same default. Hover over a field to see what it does, and use
+*Browse…* to pick topology, trajectory and data files.
+
+- **Validation before running.** Values are checked with the same rules as the
+  CLI: whole numbers ≥ 1 for stride and depths, `min depth ≤ max depth`,
+  cooperativity in (0, 1], positive thresholds and cutoffs, files that exist,
+  output folders that exist, and the right kind of input file for the chosen
+  visualization mode. A problem opens a dialog naming the field and moves the
+  cursor to it.
+- **Live feedback.** Stages run in the background. The log pane streams
+  Gephyra's messages as they happen, and the progress bar tracks frames
+  (analysis) or distance-matrix pairs (clustering). *Cancel* stops after the
+  current frame; output files keep what was written before that.
+- **Errors as dialogs.** Failures such as a root selection that matches no atoms
+  are shown as a short message, not a traceback. The full traceback is still
+  available with `gephyra -v gui`.
+- **Chained steps.** A finished analysis fills in the clustering input, and a
+  finished clustering fills in the visualization input and switches it to
+  `cluster` mode.
+- **Reproducibility.** Each run writes the equivalent `gephyra …` command to the
+  log, and *Copy CLI command* puts it on the clipboard for scripts or HPC jobs.
+
+The interface uses only `tkinter`, which ships with Python. On some Linux
+distributions it is a separate system package, for example
+`sudo apt install python3-tk`.
 
 ## Usage
 
@@ -141,7 +184,11 @@ two frames is applied uniformly, including when only one path topology remains.
 ### 2. Visualize
 
 ```bash
-# Clustered medoids (supports vmd, pymol, chimera)
+# Clustered medoids (supports vmd, pymol, chimera, chimerax)
+gephyra visualize \
+  --data clustered_pathways.json --format chimerax --mode cluster \
+  --output cluster_medoids.cxc
+
 gephyra visualize \
   --data clustered_pathways.json --format vmd --mode cluster \
   --output cluster_medoids.tcl
@@ -173,12 +220,52 @@ gephyra visualize \
 | Option | Default | Description |
 |---|---|---|
 | `--data` | required | Input file. `--mode cluster` expects the `clustered_pathways.json` written by `cluster`; `--mode density` and `--mode frame` expect the `.jsonl` written by `calculate`. Passing the wrong one for the mode is detected and reported as an error. |
-| `--format` | `vmd` | `vmd`, `pymol`, or `chimera`. |
+| `--format` | `vmd` | `vmd` (`.tcl`), `pymol` (`.py`), `chimera` (legacy UCSF Chimera, `.py` + `.bild`) or `chimerax` (UCSF ChimeraX, `.cxc` + `.bild`, plus `.pb` in frame mode). |
 | `--mode` | `density` | `density` (all frames overlaid), `frame` (single frame), or `cluster` (clustered medoids). |
 | `--frame` | — | Trajectory frame index to visualize with `--mode frame`. If omitted, or not present in the data (e.g. skipped by `--stride`), the first stored frame is used and a warning is logged. |
 | `--cluster_id` | — | Specific cluster ID to visualize by its sequential rank (only applies when `--mode cluster`). |
 | `--max_bond_draw_dist` | `6.0` | Maximum Euclidean distance in Å between two connected path atoms before the segment is treated as a periodic-boundary artifact and skipped. Should sit slightly above your `--coarse_cutoff`; the default is safe for the default cutoff of 4.5 Å. |
-| `--output` | `pathways_viz` | Output script filename or prefix. |
+| `--chimerax_model` | `#1` | ChimeraX model that holds your structure; atom selections and pseudobonds are scoped to it. Only used with `--format chimerax`. |
+| `--output` | `pathways_viz` | Output script filename or prefix. The viewer's extension is added if missing. |
+
+### Visualizing in UCSF ChimeraX
+
+`--format chimerax` writes a ChimeraX command script (`.cxc`) and a `.bild`
+geometry file next to it with the same name. In `frame` mode it also writes a
+`.pb` pseudobond file. Load your structure first, then open the script:
+
+```text
+open system.pdb
+open cluster_medoids.cxc
+```
+
+You can also drag the `.cxc` file onto the ChimeraX window. What each mode draws:
+
+| Mode | ChimeraX output |
+|---|---|
+| `cluster` | Each cluster medoid as cylinders and spheres in its own colour, with a 2D legend (`2dlabels`) giving the cluster ID, occupancy and size. Use `--cluster_id N` to draw a single cluster. |
+| `density` | Every path segment from every frame as thin, 70 % transparent cyan cylinders. |
+| `frame` | The path atoms of that frame are selected, shown as orange sticks, and drawn as static BILD geometry. They are also joined by dashed **pseudobonds**, which are attached to the atoms themselves. Load the trajectory onto the same model (for example `open traj.xtc structureModel #1`) and the pseudobonds follow the atoms as you play it. |
+
+How this differs from the legacy `chimera` output:
+
+- It is a plain command script, not Python run through `chimera.runCommand`.
+- Atoms are addressed with ChimeraX specs (`#1@@serial_number=N`) instead of a
+  Python loop over `openModels`.
+- BILD models open in scene coordinates, so no `matrixset` step is needed.
+- Transparency is set inside the BILD file.
+
+Atoms are matched by the serial numbers that `calculate` stores in `atom_ids`,
+i.e. the topology's atom IDs (PDB serials for a PDB topology). For this to work:
+
+- **Open the same structure the analysis used.** A pseudobond whose atom cannot
+  be found makes ChimeraX stop the script at that line.
+- **Keep the structure at model `#1`, or tell Gephyra where it is.** If it is
+  elsewhere, regenerate with `--chimerax_model '#2'`, for example. The specs are
+  scoped to that one model because an unscoped serial number would match an atom
+  in every open structure.
+- **Open a multi-model PDB trajectory as a single model.** Use
+  `open traj.pdb coordset true`, otherwise each MODEL becomes its own sub-model.
 
 ## Solvent naming conventions
 

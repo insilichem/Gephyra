@@ -35,7 +35,8 @@ def compute_persistence(frame_indices_sorted, total_frames, stride):
 
     return mean_persistence, max_persistence
 
-def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_trigger=1000, max_paths=60000, output_file="clustered_pathways.json"):
+def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_trigger=1000, max_paths=60000, output_file="clustered_pathways.json",
+                     progress_callback=None):
     """
     Reads JSONL trajectory data and performs temporal clustering to identify
     collective pathways using a Hybrid 9D-Vector representation.
@@ -47,6 +48,8 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
 
     Args:
         coarse_trigger (int): Dataset size threshold. If the number of paths is less than or equal to this value, the 9D coarse screening is bypassed to maximize topological fidelity.
+        progress_callback: optional callable(done, total) reporting progress of
+            the Fréchet distance matrix. It may raise to abort the run.
     """
     logger.info("Starting temporal clustering of pathways...")
     import scipy.spatial.distance as ssd
@@ -223,6 +226,8 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
         while done / total >= next_log[0] and next_log[0] <= 1.0:
             logger.info(f"Fréchet matrix calculation: {int(round(next_log[0] * 100))}% complete...")
             next_log[0] += 0.10
+        if progress_callback is not None:
+            progress_callback(done, total)
 
     # Discrete Fréchet distance (Eiter-Mannila), vectorised over pairs of equal
     # length combination. Numerically identical to similaritymeasures.frechet_dist.
@@ -352,7 +357,7 @@ def sanitize_csv_field(field_value):
 def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resname WAT or resname HOH",
                  stride=1, max_depth=10, min_depth=1, prob_threshold=None, cooperativity=0.92, coarse_cutoff=4.5,
                  output_file="results.jsonl", csv_file=None, cluster=False, cluster_threshold=6.0,
-                 cluster_output="clustered_pathways.json"):
+                 cluster_output="clustered_pathways.json", progress_callback=None):
     """
     Iterates over the trajectory and aggregates network pathways.
     Streams output as JSON Lines (JSONL) to prevent memory exhaustion,
@@ -368,6 +373,9 @@ def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resna
             the default of the 'cluster' sub-command.
         cluster_output: output path for the inline clustering. Matches the
             default of the 'cluster' sub-command.
+        progress_callback: optional callable(frames_done, frames_total), called
+            after every analysed frame. It may raise to abort the run; output
+            files are closed and keep the frames written so far.
 
     Raises:
         ValueError: if a numerical parameter is out of range or the root
@@ -425,6 +433,7 @@ def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resna
             root_sel=root_sel, water_sel=water_sel, stride=stride, max_depth=max_depth,
             min_depth=min_depth, prob_threshold=prob_threshold, cooperativity=cooperativity,
             coarse_cutoff=coarse_cutoff, total_processed=total_processed,
+            progress_callback=progress_callback,
         )
 
     if csv_file:
@@ -467,7 +476,7 @@ def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resna
 
 def _process_trajectory(u, water_atoms, root_atoms, out_f, csv_writer, path_frequency, *,
                         root_sel, water_sel, stride, max_depth, min_depth, prob_threshold,
-                        cooperativity, coarse_cutoff, total_processed):
+                        cooperativity, coarse_cutoff, total_processed, progress_callback=None):
     """
     Frame loop of run_analysis: writes the metadata line, one line per frame
     and the trailing path_statistics line to `out_f`.
@@ -499,6 +508,7 @@ def _process_trajectory(u, water_atoms, root_atoms, out_f, csv_writer, path_freq
     }
     out_f.write(json.dumps(metadata) + '\n')
 
+    frames_done = 0
     for ts in u.trajectory[::stride]:
         frame_idx = ts.frame
         logger.info(f"Analyzing frame {frame_idx}...")
@@ -563,6 +573,9 @@ def _process_trajectory(u, water_atoms, root_atoms, out_f, csv_writer, path_freq
 
         # Write frame data immediately to release RAM
         out_f.write(json.dumps({"type": "frame", "frame_idx": frame_idx, "paths": frame_paths_data}) + '\n')
+        frames_done += 1
+        if progress_callback is not None:
+            progress_callback(frames_done, total_processed)
 
     # Calculate path statistics
     top_paths = []
