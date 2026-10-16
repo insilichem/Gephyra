@@ -61,6 +61,22 @@ def calculate_hbond_probability(mod_rOO, mod_rOiH, mod_rOjH, r0_oo=2.80, r0_thre
     return p_angle * p_dist * p_steric
 
 
+def normalize_hquality(z):
+    """
+    Maps the unbounded H-quality Z = sum(exp(-w)) onto [0, 1).
+
+    Uses Z / (1 + Z): the Boltzmann-like weight of the bridged channel against
+    a single reference state of weight 1 (no bridge). The map is monotonic, so
+    it preserves every ranking made on Z; it is 0.5 at Z = 1 and saturates as
+    degenerate channels accumulate routes. It is a bounded score, not a
+    measured probability.
+    """
+    z = float(z)
+    if z <= 0.0:
+        return 0.0
+    return z / (1.0 + z)
+
+
 def _condensed_index(n, i, j):
     """Position of pair (i, j), i < j, in a SciPy condensed distance vector."""
     return n * i - (i * (i + 1)) // 2 + (j - i - 1)

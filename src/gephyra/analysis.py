@@ -7,9 +7,21 @@ import MDAnalysis as mda
 import numpy as np
 
 from .core import build_graph, compute_edge_probabilities, traverse_network
-from .math_utils import pairwise_discrete_frechet, condensed_submatrix
+from .math_utils import pairwise_discrete_frechet, condensed_submatrix, normalize_hquality
 
 logger = logging.getLogger(__name__)
+
+
+def path_hquality(path):
+    """
+    H-quality Z of one path record from a .jsonl file.
+
+    Files written before 0.3.0 stored Z under the misleading key
+    'probability'; it is still read so that old outputs can be clustered.
+    """
+    if 'hquality' in path:
+        return float(path['hquality'])
+    return float(path['probability'])
 
 def compute_persistence(frame_indices_sorted, total_frames, stride):
     """
@@ -81,7 +93,8 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
                     if nodes_tuple not in unique_paths:
                         unique_paths[nodes_tuple] = {
                             'frames': set(),
-                            'prob_sum': 0.0,
+                            'hquality_sum': 0.0,
+                            'hquality_norm_sum': 0.0,
                             'count': 0,
                             'coords': coords.tolist(), # Keep one full sequence for medoid
                             '9d_sum': np.zeros(9)
@@ -92,7 +105,9 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
                     # the same path in tens of thousands of frames.
                     entry = unique_paths[nodes_tuple]
                     entry['frames'].add(frame_idx)
-                    entry['prob_sum'] += p['probability']
+                    z = path_hquality(p)
+                    entry['hquality_sum'] += z
+                    entry['hquality_norm_sum'] += normalize_hquality(z)
                     entry['count'] += 1
                     entry['9d_sum'] += np.concatenate([coords[0], coords[len(coords)//2], coords[-1]])
 
@@ -108,13 +123,15 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
     # Build candidate list — all unique paths proceed to spatial clustering.
     filtered_paths = []
     for nodes, data in unique_paths.items():
-        avg_prob = data['prob_sum'] / data['count']
+        avg_hquality = data['hquality_sum'] / data['count']
+        avg_hquality_norm = data['hquality_norm_sum'] / data['count']
         avg_9d = data['9d_sum'] / data['count']
         filtered_paths.append({
             'nodes': nodes,
             'frames': data['frames'],
             'occupancy': len(data['frames']) / total_frames if total_frames > 0 else 0.0,
-            'avg_prob': avg_prob,
+            'avg_hquality': avg_hquality,
+            'avg_hquality_norm': avg_hquality_norm,
             'coords': data['coords'],
             'avg_9d': avg_9d
         })
@@ -132,9 +149,9 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
     if n_filtered > max_paths:
         logger.warning(f"Number of paths ({n_filtered}) exceeds maximum cap ({max_paths}). "
                        f"Truncating to top {max_paths} paths to prevent memory crash. "
-                       "Tie-breaking identical occupancies using average bond probability.")
-        # Sort primarily by occupancy, secondarily by avg_prob (thermodynamic quality)
-        filtered_paths.sort(key=lambda x: (x['occupancy'], x['avg_prob']), reverse=True)
+                       "Tie-breaking identical occupancies using average H-quality.")
+        # Sort primarily by occupancy, secondarily by H-quality
+        filtered_paths.sort(key=lambda x: (x['occupancy'], x['avg_hquality']), reverse=True)
         filtered_paths = filtered_paths[:max_paths]
         n_filtered = len(filtered_paths)
 
@@ -166,14 +183,15 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
 
             rep_path = copy.deepcopy(cluster_paths[medoid_local_idx])
 
-            # Merge frames and probabilities from all paths in this coarse cluster
+            # Merge frames and H-quality from all paths in this coarse cluster
             merged_frames = set()
             for p in cluster_paths:
                 merged_frames.update(p['frames'])
 
             rep_path['frames'] = merged_frames
             rep_path['occupancy'] = len(merged_frames) / total_frames if total_frames > 0 else 0.0
-            rep_path['avg_prob'] = np.mean([p['avg_prob'] for p in cluster_paths])
+            rep_path['avg_hquality'] = np.mean([p['avg_hquality'] for p in cluster_paths])
+            rep_path['avg_hquality_norm'] = np.mean([p['avg_hquality_norm'] for p in cluster_paths])
 
             coarse_screened_paths.append(rep_path)
 
@@ -207,7 +225,8 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
             "cluster_id": 1,
             "size": 1,
             "occupancy": float(filtered_paths[0]['occupancy']),
-            "avg_prob_Hquality": float(filtered_paths[0]['avg_prob']),
+            "avg_hquality": float(filtered_paths[0]['avg_hquality']),
+            "avg_hquality_norm": float(filtered_paths[0]['avg_hquality_norm']),
             "medoid_frame": medoid_frame,
             "mean_persistence_frames": mean_pers,
             "max_persistence_frames": max_pers,
@@ -281,8 +300,9 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
 
         occupancy = len(cluster_frames) / total_frames if total_frames > 0 else 0.0
 
-        # Calculate average probability across all paths in the cluster
-        avg_prob = np.mean([p['avg_prob'] for p in cluster_paths])
+        # Average H-quality across all paths in the cluster
+        avg_hquality = np.mean([p['avg_hquality'] for p in cluster_paths])
+        avg_hquality_norm = np.mean([p['avg_hquality_norm'] for p in cluster_paths])
 
         # Medoid calculation
         # Extract the sub-matrix of distances between elements in this cluster
@@ -305,7 +325,8 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
             "cluster_id": int(label),
             "size": len(cluster_indices),
             "occupancy": float(occupancy),
-            "avg_prob_Hquality": float(avg_prob),
+            "avg_hquality": float(avg_hquality),
+            "avg_hquality_norm": float(avg_hquality_norm),
             "medoid_frame": medoid_frame,
             "mean_persistence_frames": mean_pers,
             "max_persistence_frames": max_pers,
@@ -426,9 +447,9 @@ def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resna
         if csv_file:
             csv_f = stack.enter_context(open(csv_file, 'w', newline=''))
             csv_writer = csv.writer(csv_f)
-            csv_writer.writerow(["Frame", "Root_Residue", "Path_Atom_Indices", "Path_Length", "Cumulative_Probability", "Average_OO_Distance"])
+            csv_writer.writerow(["Frame", "Root_Residue", "Path_Atom_Indices", "Path_Length", "HQuality_Z", "HQuality_Norm", "Average_OO_Distance"])
 
-        found_large_path, total_paths, total_discarded, total_length_sum, total_prob_sum = _process_trajectory(
+        found_large_path, total_paths, total_discarded, total_length_sum, total_hquality_sum = _process_trajectory(
             u, water_atoms, root_atoms, out_f, csv_writer, path_frequency,
             root_sel=root_sel, water_sel=water_sel, stride=stride, max_depth=max_depth,
             min_depth=min_depth, prob_threshold=prob_threshold, cooperativity=cooperativity,
@@ -447,14 +468,15 @@ def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resna
             f.write(json.dumps({"type": "notice", "message": notice_msg}) + '\n')
 
     avg_length = float(total_length_sum) / total_paths if total_paths > 0 else 0.0
-    avg_prob = float(total_prob_sum) / total_paths if total_paths > 0 else 0.0
+    avg_hquality = float(total_hquality_sum) / total_paths if total_paths > 0 else 0.0
 
     logger.info("=== Analysis Complete ===")
     logger.info(f"Total paths written across analyzed frames: {total_paths}")
     if total_discarded:
         logger.info(f"Paths discarded by --min_depth {min_depth}: {total_discarded}")
     logger.info(f"Average path length (depth): {avg_length:.2f}")
-    logger.info(f"Average PHquality (Z): {avg_prob:.4f}")
+    logger.info(f"Average H-quality (Z): {avg_hquality:.4f} "
+                f"(normalized: {normalize_hquality(avg_hquality):.4f})")
     logger.info(f"Results saved to {output_file}")
 
     if cluster:
@@ -482,12 +504,12 @@ def _process_trajectory(u, water_atoms, root_atoms, out_f, csv_writer, path_freq
     and the trailing path_statistics line to `out_f`.
 
     Returns (found_large_path, total_paths, total_discarded, total_length_sum,
-    total_prob_sum). `total_paths` counts only the paths actually written, i.e.
+    total_hquality_sum). `total_paths` counts only the paths actually written, i.e.
     after the --min_depth filter, so averages derived from these totals refer
     to the same population as the output file.
     """
     total_length_sum = 0
-    total_prob_sum = 0
+    total_hquality_sum = 0
     total_paths = 0
     total_discarded = 0
     found_large_path = False
@@ -523,7 +545,7 @@ def _process_trajectory(u, water_atoms, root_atoms, out_f, csv_writer, path_freq
         paths = traverse_network(g, root_indices, max_depth=max_depth, prob_threshold=prob_threshold, cooperativity=cooperativity)
 
         frame_paths_data = []
-        for path_indices, z_total in paths:
+        for path_indices, hquality in paths:
             path_len = len(path_indices) - 1
 
             if path_len < min_depth:
@@ -535,7 +557,8 @@ def _process_trajectory(u, water_atoms, root_atoms, out_f, csv_writer, path_freq
 
             total_paths += 1
             total_length_sum += path_len
-            total_prob_sum += z_total
+            total_hquality_sum += hquality
+            hquality_norm = normalize_hquality(hquality)
 
             path_tuple = tuple(int(n) for n in path_indices)
             path_frequency.setdefault(path_tuple, set()).add(frame_idx)
@@ -556,7 +579,8 @@ def _process_trajectory(u, water_atoms, root_atoms, out_f, csv_writer, path_freq
                 "nodes": [int(n) for n in path_indices],
                 "atom_ids": atom_ids,
                 "coords": coords,
-                "probability": float(z_total),
+                "hquality": float(hquality),
+                "hquality_norm": hquality_norm,
                 "length": path_len,
                 "avg_oo_dist": avg_oo
             })
@@ -569,7 +593,7 @@ def _process_trajectory(u, water_atoms, root_atoms, out_f, csv_writer, path_freq
                 safe_root_res = sanitize_csv_field(root_res)
                 safe_path_str = sanitize_csv_field(path_str)
 
-                csv_writer.writerow([frame_idx, safe_root_res, safe_path_str, path_len, z_total, avg_oo])
+                csv_writer.writerow([frame_idx, safe_root_res, safe_path_str, path_len, hquality, hquality_norm, avg_oo])
 
         # Write frame data immediately to release RAM
         out_f.write(json.dumps({"type": "frame", "frame_idx": frame_idx, "paths": frame_paths_data}) + '\n')
@@ -599,4 +623,4 @@ def _process_trajectory(u, water_atoms, root_atoms, out_f, csv_writer, path_freq
     }
     out_f.write(json.dumps(path_stats_obj) + '\n')
 
-    return found_large_path, total_paths, total_discarded, total_length_sum, total_prob_sum
+    return found_large_path, total_paths, total_discarded, total_length_sum, total_hquality_sum

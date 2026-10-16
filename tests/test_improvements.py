@@ -12,7 +12,7 @@ import numpy as np
 from gephyra import __version__
 from gephyra.analysis import cluster_pathways, run_analysis, validate_calculation_parameters
 from gephyra.cli import main
-from gephyra.math_utils import condensed_submatrix, pairwise_discrete_frechet
+from gephyra.math_utils import condensed_submatrix, normalize_hquality, pairwise_discrete_frechet
 from gephyra.visualize import _bild_path, _resolve_frame, detect_data_kind, run_visualization
 
 try:
@@ -65,7 +65,7 @@ def _write_jsonl(path, n_frames, frames):
 
 
 class TestClusterSinglePath(unittest.TestCase):
-    PATH = {"nodes": [0, 1, 2], "coords": [[0, 0, 0], [1, 0, 0], [2, 0, 0]], "probability": 0.5}
+    PATH = {"nodes": [0, 1, 2], "coords": [[0, 0, 0], [1, 0, 0], [2, 0, 0]], "hquality": 0.5}
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -89,12 +89,34 @@ class TestClusterSinglePath(unittest.TestCase):
         self.assertEqual(len(clusters), 1)
         self.assertAlmostEqual(clusters[0]["occupancy"], 0.75)
         self.assertEqual(clusters[0]["max_persistence_frames"], 2)
-        self.assertAlmostEqual(clusters[0]["avg_prob_Hquality"], 0.5)
+        self.assertAlmostEqual(clusters[0]["avg_hquality"], 0.5)
+        self.assertAlmostEqual(clusters[0]["avg_hquality_norm"], 0.5 / 1.5)
+        self.assertNotIn("avg_prob_Hquality", clusters[0])
+
+    def test_legacy_probability_key_is_still_read(self):
+        legacy = {k: v for k, v in self.PATH.items() if k != "hquality"}
+        legacy["probability"] = 2.0
+        _write_jsonl(self.data, 2, [(0, [legacy]), (1, [legacy])])
+        cluster_pathways(self.data, output_file=self.out)
+        with open(self.out) as f:
+            clusters = json.load(f)
+        self.assertAlmostEqual(clusters[0]["avg_hquality"], 2.0)
+        self.assertAlmostEqual(clusters[0]["avg_hquality_norm"], 2.0 / 3.0)
 
     def test_rejects_non_positive_threshold(self):
         _write_jsonl(self.data, 1, [(0, [self.PATH])])
         with self.assertRaises(ValueError):
             cluster_pathways(self.data, threshold=0, output_file=self.out)
+
+
+class TestNormalizeHquality(unittest.TestCase):
+    def test_bounded_and_monotonic(self):
+        values = [0.0, 1e-6, 0.5, 1.0, 3.0, 50.0, 1e6]
+        normed = [normalize_hquality(z) for z in values]
+        self.assertEqual(normed[0], 0.0)
+        self.assertAlmostEqual(normalize_hquality(1.0), 0.5)
+        self.assertTrue(all(0.0 <= v < 1.0 for v in normed))
+        self.assertEqual(normed, sorted(normed))
 
 
 class TestParameterValidation(unittest.TestCase):
@@ -144,6 +166,26 @@ class TestRunAnalysisEndToEnd(unittest.TestCase):
         # Average depth must be that of the written path alone (2), not diluted
         # by the discarded depth-1 path.
         self.assertIn("Average path length (depth): 2.00", log)
+
+    def test_outputs_use_hquality_names(self):
+        import csv
+        csv_out = os.path.join(self.tmp, "r.csv")
+        self._run(max_depth=3, csv_file=csv_out)
+        with open(self.out) as f:
+            objs = [json.loads(line) for line in f if line.strip()]
+        paths = [p for o in objs if o["type"] == "frame" for p in o["paths"]]
+        self.assertTrue(paths)
+        for p in paths:
+            self.assertNotIn("probability", p)
+            self.assertGreater(p["hquality"], 0.0)
+            self.assertAlmostEqual(p["hquality_norm"], normalize_hquality(p["hquality"]))
+        with open(csv_out, newline='') as f:
+            rows = list(csv.DictReader(f))
+        self.assertNotIn("Cumulative_Probability", rows[0])
+        self.assertEqual(len(rows), len(paths))
+        for row, p in zip(rows, paths):
+            self.assertAlmostEqual(float(row["HQuality_Z"]), p["hquality"])
+            self.assertAlmostEqual(float(row["HQuality_Norm"]), p["hquality_norm"])
 
     def test_empty_root_selection_raises(self):
         with self.assertRaises(ValueError):

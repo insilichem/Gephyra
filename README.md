@@ -33,19 +33,50 @@ Gephyra (derived from the Ancient Greek word for "bridge") is a network-graph an
   is discarded as thermal noise. The step also applies a hard safety cap to
   prevent RAM exhaustion, and uses geometric medoid selection to avoid occupancy
   bias. This produces a
-  `clustered_pathways.json` file with cluster size, occupancy, average probability,
+  `clustered_pathways.json` file with cluster size, occupancy, average H-quality,
   persistence statistics (`mean_persistence_frames` and `max_persistence_frames`
   accounting for stride), and a representative full-coordinate medoid geometry.
 
-* **Understanding `PHquality` (Network Pathway Quality):** In the output files (e.g., `clustered_pathways.json`), the metric labeled `avg_prob_Hquality` (often referred to as `PHquality`) does not represent a standard fractional probability bounded between [0, 1]. Instead, it functions as a statistical sum of network microstates.
-  
-  * **How it is calculated:** For a given spatial endpoint, the algorithm evaluates all parallel microstates (unique atomic permutations) of water chains connecting the root to that solvent region. The quality score is the sum of the exponentially weighted edge probabilities across all these routing permutations: Z = sum(exp(-w)), where w is the accumulated logarithmic penalty of the path geometry (derived strictly from distance, angle, and steric switching functions).
-    
-  * **How to interpret this value:**
-    * *Values can exceed 1.0:* Because this is an aggregated sum of multiple available structural routes, highly branched or degenerate channels with multiple parallel permutations will accumulate scores > 1.0.
-    * *Physical meaning:* A higher `PHquality` indicates a high degree of topological degeneracy and geometric robustness. It measures how many favorable, pre-organized hydrogen-bond network permutations exist within that spatial channel.
+- **H-quality score (Z):** Every path is reported with an *H-quality*, not a
+  probability.
 
-  * **The same quantity appears under three names.** `avg_prob_Hquality` in `clustered_pathways.json`, the `probability` key of each path in the `.jsonl`, and the `Cumulative_Probability` column of the CSV all hold Z. Two of those names are misleading: Z is not bounded by 1 and is not a probability. They are kept as-is only so that existing output files and downstream scripts keep parsing. If you are writing new code against Gephyra output, read them as `hquality`.
+  * **How it is calculated:** For a given spatial endpoint, the algorithm
+    enumerates every route (unique atomic permutation) of water chains
+    connecting the root to that endpoint. H-quality is the sum of the
+    exponentially weighted route scores, Z = Σ exp(−w), where w is the
+    accumulated, cooperativity-discounted −log penalty of the route's bonds
+    (derived from the distance, angle and steric switching functions). The
+    individual *bond* scores are in [0, 1]; their aggregate Z is not.
+  * **How to interpret Z:**
+    * *Values can exceed 1.0.* Highly branched or degenerate channels with many
+      parallel routes accumulate Z > 1. Z is unbounded and is **not a
+      probability**.
+    * *Physical meaning.* A higher Z indicates topological degeneracy and
+      geometric robustness: how many favourable, pre-organised hydrogen-bond
+      routes exist within that channel.
+  * **Normalised H-quality.** For plots, thresholds and comparisons between
+    systems, each value also comes with a bounded companion in [0, 1):
+    `hquality_norm = Z / (1 + Z)`. This is the weight of the bridged channel
+    against a single reference state of weight 1 (no bridge). The map is
+    monotonic, so rankings are identical to those on Z; it equals 0.5 at Z = 1
+    and saturates for very degenerate channels. It is a bounded score, not a
+    measured probability. The helper is `gephyra.math_utils.normalize_hquality`.
+  * **Where it appears:**
+
+    | File | Raw Z | Normalised |
+    |---|---|---|
+    | `.jsonl` (each path) | `hquality` | `hquality_norm` |
+    | `.csv` | `HQuality_Z` | `HQuality_Norm` |
+    | `clustered_pathways.json` | `avg_hquality` | `avg_hquality_norm` |
+
+    In clusters, `avg_hquality_norm` is the mean of the per-occurrence
+    normalised values, not the normalisation of `avg_hquality`.
+  * **Upgrading from 0.2.x.** Earlier versions wrote the same Z under the
+    misleading names `probability` (`.jsonl`), `Cumulative_Probability` (CSV)
+    and `avg_prob_Hquality` (clusters). Those names are no longer written;
+    update downstream scripts to the names above. `gephyra cluster` still
+    reads old `.jsonl` files that use `probability`, so existing results do not
+    need to be recalculated.
 
 - **Multi-phase execution:**
   - **Phase 1 — `calculate`:** Processes trajectory frames via MDAnalysis
@@ -135,7 +166,7 @@ gephyra calculate \
   --min_depth 3 \
   --coarse_cutoff 4.5 \
   --output results.jsonl \
-  --csv   summary.csv \
+  --csv   summary.csv
 ```
 
 | Option | Default | Description |
@@ -150,7 +181,7 @@ gephyra calculate \
 | `--cooperativity` | `0.92` | Geometric discount applied to successive hydrogen bonds along a chain: the *k*-th bond contributes its weight scaled by `cooperativity^(k-1)`. This models the polarisation that propagates along a water wire, which makes a bond embedded in a chain stronger than the same geometry in isolation. Values below 1.0 favour longer chains; `1.0` disables the effect and recovers the plain product of edge probabilities. |
 | `--coarse_cutoff` | `4.5` | Distance cutoff in Å for initial neighbour graph construction. |
 | `--output` | `results.jsonl` | Output file for full frame-by-frame path data (JSON Lines format). |
-| `--csv` | — | Optional human-readable CSV summary of detected paths. |
+| `--csv` | — | Optional human-readable CSV summary of detected paths (columns `Frame`, `Root_Residue`, `Path_Atom_Indices`, `Path_Length`, `HQuality_Z`, `HQuality_Norm`, `Average_OO_Distance`). |
 
 
 ### 1.5. Cluster
@@ -360,16 +391,17 @@ not be reliably detected or visualised.
 scattered across a 10 000-frame trajectory receives the same
 occupancy score (0.01) as a path present in 100 consecutive frames.
 Only the latter constitutes a genuinely persistent structural feature.
-If persistence matters for your analysis, filter the `top_paths` output
-manually or apply the `--cluster` option, which groups paths by spatial
-similarity and reports per-cluster occupancy.
+If persistence matters for your analysis, run `gephyra cluster`, which groups
+paths by spatial similarity and reports per-cluster occupancy together with
+`mean_persistence_frames` and `max_persistence_frames` (the mean and longest
+runs of consecutive analysed frames).
 
 **Very large path counts.** The clustering step uses a hard maximum cap (`max_paths=60000`)
 and requires a fully merged cluster to appear in at least two frames to prevent memory
 bottlenecks and filter out raw thermal noise. For long trajectories with extreme branching,
 the clustering step may truncate the least frequent paths. Use
 `--stride` to reduce frame count or increase `--min_depth` to
-reduce the number of short paths before enabling `--cluster`.
+reduce the number of short paths before running `gephyra cluster`.
 
 
 ## Method and provenance

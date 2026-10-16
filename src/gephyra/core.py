@@ -385,10 +385,11 @@ def traverse_network(g, root_indices, max_depth=5, prob_threshold=None, cooperat
         cooperativity: per-depth discount factor described above.
 
     Returns:
-        A list of (path, Z) tuples, one per endpoint reached. `path` is the
-        lowest-weight route to that endpoint; Z is sum(exp(-w)) over every route
-        to it, i.e. the unbounded quantity the README calls PHquality, not a
-        probability in [0, 1].
+        A list of (path, hquality) tuples, one per endpoint reached. `path` is
+        the lowest-weight route to that endpoint; hquality is the H-quality
+        Z = sum(exp(-w)) over every route to it. Z is unbounded (it exceeds 1 for
+        degenerate channels) and is not a probability; see
+        math_utils.normalize_hquality for a bounded version.
     """
     import heapq
     import itertools
@@ -438,8 +439,8 @@ def traverse_network(g, root_indices, max_depth=5, prob_threshold=None, cooperat
 
     final_results = []
     for endpoint, paths_data in endpoint_groups.items():
-        z_total = sum(np.exp(-w) for w, p in paths_data)
+        hquality = sum(np.exp(-w) for w, p in paths_data)
         best_path = min(paths_data, key=lambda x: x[0])[1]
-        final_results.append((best_path, float(z_total)))
+        final_results.append((best_path, float(hquality)))
 
     return final_results

@@ -22,8 +22,8 @@ def _write_jsonl(path, frames, n_frames=None):
             f.write(json.dumps({"type": "frame", "frame_idx": idx, "paths": paths}) + "\n")
 
 
-PATH_A = {"nodes": [0, 1, 2], "atom_ids": [1, 2, 3], "coords": [[0, 0, 0], [2.8, 0, 0], [5.6, 0, 0]], "probability": 0.5}
-PATH_B = {"nodes": [0, 1, 3], "atom_ids": [1, 2, 4], "coords": [[0, 0, 0], [2.8, 0, 0], [2.8, 2.8, 0]], "probability": 0.4}
+PATH_A = {"nodes": [0, 1, 2], "atom_ids": [1, 2, 3], "coords": [[0, 0, 0], [2.8, 0, 0], [5.6, 0, 0]], "hquality": 0.5}
+PATH_B = {"nodes": [0, 1, 3], "atom_ids": [1, 2, 4], "coords": [[0, 0, 0], [2.8, 0, 0], [2.8, 2.8, 0]], "hquality": 0.4}
 CLUSTERS = [
     {"cluster_id": 1, "size": 3, "occupancy": 0.8, "medoid_frame": 4, "medoid_coords": [[0, 0, 0], [1, 0, 0]]},
     {"cluster_id": 2, "size": 1, "occupancy": 0.25, "medoid_frame": 7, "medoid_coords": [[0, 0, 0], [0, 1, 0], [0, 2, 0]]},
@@ -300,7 +300,7 @@ class TestForms(_TmpDir):
 class TestProgressCallbacks(_TmpDir):
     def test_cluster_reports_progress_and_can_abort(self):
         from gephyra.analysis import cluster_pathways
-        paths = [{"nodes": [0, i], "coords": [[0, 0, 0], [i, 0, 0]], "probability": 1.0} for i in range(1, 6)]
+        paths = [{"nodes": [0, i], "coords": [[0, 0, 0], [i, 0, 0]], "hquality": 1.0} for i in range(1, 6)]
         _write_jsonl(self.p("r.jsonl"), [(0, paths), (1, paths)])
         calls = []
         cluster_pathways(self.p("r.jsonl"), output_file=self.p("c.json"), progress_callback=lambda d, t: calls.append((d, t)))
