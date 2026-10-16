@@ -33,19 +33,50 @@ Gephyra (derived from the Ancient Greek word for "bridge") is a network-graph an
   is discarded as thermal noise. The step also applies a hard safety cap to
   prevent RAM exhaustion, and uses geometric medoid selection to avoid occupancy
   bias. This produces a
-  `clustered_pathways.json` file with cluster size, occupancy, average probability,
+  `clustered_pathways.json` file with cluster size, occupancy, average H-quality,
   persistence statistics (`mean_persistence_frames` and `max_persistence_frames`
   accounting for stride), and a representative full-coordinate medoid geometry.
 
-* **Understanding `PHquality` (Network Pathway Quality):** In the output files (e.g., `clustered_pathways.json`), the metric labeled `avg_prob_Hquality` (often referred to as `PHquality`) does not represent a standard fractional probability bounded between [0, 1]. Instead, it functions as a statistical sum of network microstates.
-  
-  * **How it is calculated:** For a given spatial endpoint, the algorithm evaluates all parallel microstates (unique atomic permutations) of water chains connecting the root to that solvent region. The quality score is the sum of the exponentially weighted edge probabilities across all these routing permutations: Z = sum(exp(-w)), where w is the accumulated logarithmic penalty of the path geometry (derived strictly from distance, angle, and steric switching functions).
-    
-  * **How to interpret this value:**
-    * *Values can exceed 1.0:* Because this is an aggregated sum of multiple available structural routes, highly branched or degenerate channels with multiple parallel permutations will accumulate scores > 1.0.
-    * *Physical meaning:* A higher `PHquality` indicates a high degree of topological degeneracy and geometric robustness. It measures how many favorable, pre-organized hydrogen-bond network permutations exist within that spatial channel.
+- **H-quality score (Z):** Every path is reported with an *H-quality*, not a
+  probability.
 
-  * **The same quantity appears under three names.** `avg_prob_Hquality` in `clustered_pathways.json`, the `probability` key of each path in the `.jsonl`, and the `Cumulative_Probability` column of the CSV all hold Z. Two of those names are misleading: Z is not bounded by 1 and is not a probability. They are kept as-is only so that existing output files and downstream scripts keep parsing. If you are writing new code against Gephyra output, read them as `hquality`.
+  * **How it is calculated:** For a given spatial endpoint, the algorithm
+    enumerates every route (unique atomic permutation) of water chains
+    connecting the root to that endpoint. H-quality is the sum of the
+    exponentially weighted route scores, Z = Σ exp(−w), where w is the
+    accumulated, cooperativity-discounted −log penalty of the route's bonds
+    (derived from the distance, angle and steric switching functions). The
+    individual *bond* scores are in [0, 1]; their aggregate Z is not.
+  * **How to interpret Z:**
+    * *Values can exceed 1.0.* Highly branched or degenerate channels with many
+      parallel routes accumulate Z > 1. Z is unbounded and is **not a
+      probability**.
+    * *Physical meaning.* A higher Z indicates topological degeneracy and
+      geometric robustness: how many favourable, pre-organised hydrogen-bond
+      routes exist within that channel.
+  * **Normalised H-quality.** For plots, thresholds and comparisons between
+    systems, each value also comes with a bounded companion in [0, 1):
+    `hquality_norm = Z / (1 + Z)`. This is the weight of the bridged channel
+    against a single reference state of weight 1 (no bridge). The map is
+    monotonic, so rankings are identical to those on Z; it equals 0.5 at Z = 1
+    and saturates for very degenerate channels. It is a bounded score, not a
+    measured probability. The helper is `gephyra.math_utils.normalize_hquality`.
+  * **Where it appears:**
+
+    | File | Raw Z | Normalised |
+    |---|---|---|
+    | `.jsonl` (each path) | `hquality` | `hquality_norm` |
+    | `.csv` | `HQuality_Z` | `HQuality_Norm` |
+    | `clustered_pathways.json` | `avg_hquality` | `avg_hquality_norm` |
+
+    In clusters, `avg_hquality_norm` is the mean of the per-occurrence
+    normalised values, not the normalisation of `avg_hquality`.
+  * **Upgrading from 0.2.x.** Earlier versions wrote the same Z under the
+    misleading names `probability` (`.jsonl`), `Cumulative_Probability` (CSV)
+    and `avg_prob_Hquality` (clusters). Those names are no longer written;
+    update downstream scripts to the names above. `gephyra cluster` still
+    reads old `.jsonl` files that use `probability`, so existing results do not
+    need to be recalculated.
 
 - **Multi-phase execution:**
   - **Phase 1 — `calculate`:** Processes trajectory frames via MDAnalysis
@@ -56,7 +87,12 @@ Gephyra (derived from the Ancient Greek word for "bridge") is a network-graph an
     high-level collective behaviours.
   - **Phase 2 — `visualize`:** Parses `.jsonl` output and generates
     ready-to-run scripts for PyMOL (CGO cylinders), VMD (Tcl atom
-    index selection), and UCSF Chimera (`.py` / `.bild`).
+    index selection), UCSF Chimera (`.py` / `.bild`) and UCSF ChimeraX
+    (`.cxc` / `.bild` / `.pb`).
+
+- **Graphical interface:** `gephyra gui` opens a desktop window with one tab
+  per phase, file pickers, validated inputs, live logs and progress, so the
+  whole workflow can be run without memorising command-line flags.
 
 ## Installation
 
@@ -66,11 +102,57 @@ Requires Python 3.8 or higher.
 # Standard install from repository root
 pip install .
 
-# Development (editable) install
-pip install -e .
+# Development (editable) install, with test dependencies
+pip install -e ".[test]"
 ```
 
+Run the test suite with `pytest` (or `python -m unittest discover -s tests`).
+Interface tests need a display and are skipped without one (`xvfb-run pytest`
+runs them headless). Set `GEPHYRA_TEST_CHIMERAX=1` with `chimerax` on your
+`PATH` to also open the generated ChimeraX scripts in a real, windowless
+ChimeraX session.
+
+## Graphical interface
+
+```bash
+gephyra gui        # or: gephyra-gui
+```
+
+The window has one tab per phase: **1. Pathway Analysis**, **2. Clustering**
+and **3. Visualization**. Every option from the command line is a form field
+with the same default. Hover over a field to see what it does, and use
+*Browse…* to pick topology, trajectory and data files.
+
+- **Validation before running.** Values are checked with the same rules as the
+  CLI: whole numbers ≥ 1 for stride and depths, `min depth ≤ max depth`,
+  cooperativity in (0, 1], positive thresholds and cutoffs, files that exist,
+  output folders that exist, and the right kind of input file for the chosen
+  visualization mode. A problem opens a dialog naming the field and moves the
+  cursor to it.
+- **Live feedback.** Stages run in the background. The log pane streams
+  Gephyra's messages as they happen, and the progress bar tracks frames
+  (analysis) or distance-matrix pairs (clustering). *Cancel* stops after the
+  current frame; output files keep what was written before that.
+- **Errors as dialogs.** Failures such as a root selection that matches no atoms
+  are shown as a short message, not a traceback. The full traceback is still
+  available with `gephyra -v gui`.
+- **Chained steps.** A finished analysis fills in the clustering input, and a
+  finished clustering fills in the visualization input and switches it to
+  `cluster` mode.
+- **Reproducibility.** Each run writes the equivalent `gephyra …` command to the
+  log, and *Copy CLI command* puts it on the clipboard for scripts or HPC jobs.
+
+The interface uses only `tkinter`, which ships with Python. On some Linux
+distributions it is a separate system package, for example
+`sudo apt install python3-tk`.
+
 ## Usage
+
+Global options go before the sub-command: `gephyra --version`, `gephyra -v …`
+(debug logging) and `gephyra -q …` (warnings and errors only). Numerical
+arguments are validated up front: for example, `--stride 0`, a `--cooperativity`
+outside (0, 1], or a `--min_depth` larger than `--max_depth` are rejected before
+any trajectory is loaded. `python -m gephyra` is equivalent to `gephyra`.
 
 ### 1. Calculate
 
@@ -84,7 +166,7 @@ gephyra calculate \
   --min_depth 3 \
   --coarse_cutoff 4.5 \
   --output results.jsonl \
-  --csv   summary.csv \
+  --csv   summary.csv
 ```
 
 | Option | Default | Description |
@@ -99,7 +181,7 @@ gephyra calculate \
 | `--cooperativity` | `0.92` | Geometric discount applied to successive hydrogen bonds along a chain: the *k*-th bond contributes its weight scaled by `cooperativity^(k-1)`. This models the polarisation that propagates along a water wire, which makes a bond embedded in a chain stronger than the same geometry in isolation. Values below 1.0 favour longer chains; `1.0` disables the effect and recovers the plain product of edge probabilities. |
 | `--coarse_cutoff` | `4.5` | Distance cutoff in Å for initial neighbour graph construction. |
 | `--output` | `results.jsonl` | Output file for full frame-by-frame path data (JSON Lines format). |
-| `--csv` | — | Optional human-readable CSV summary of detected paths. |
+| `--csv` | — | Optional human-readable CSV summary of detected paths (columns `Frame`, `Root_Residue`, `Path_Atom_Indices`, `Path_Length`, `HQuality_Z`, `HQuality_Norm`, `Average_OO_Distance`). |
 
 
 ### 1.5. Cluster
@@ -115,16 +197,29 @@ gephyra cluster \
 | Option | Default | Description |
 |---|---|---|
 | `--data` | required | The `.jsonl` file produced by `calculate`. |
-| `--threshold` | `6.0` | Fréchet distance threshold in Å for fine clustering. |
+| `--threshold` | `6.0` | Discrete Fréchet distance threshold in Å for fine clustering. |
 | `--coarse_trigger` | `1000` | Number of paths below which the 9D coarse filter is bypassed for direct Fréchet calculation. |
 | `--coarse_threshold` | `threshold / sqrt(3)` | 9D Feature Vector distance threshold in Å for the coarse screening pass. |
 | `--max_paths` | `60000` | Hard cap on number of paths sent to the distance matrix. |
 | `--output` | `clustered_pathways.json` | Output JSON file for the cluster summary. |
 
+The Fréchet matrix is computed with a vectorised implementation of the
+Eiter–Mannila discrete Fréchet recurrence (`gephyra.math_utils.pairwise_discrete_frechet`).
+It returns exactly the same values as `similaritymeasures.frechet_dist` but
+processes all pairs with the same pair of path lengths in one NumPy pass, which
+is one to two orders of magnitude faster. Medoids are read straight from the
+condensed distance vector, so memory use is `8 · N(N−1)/2` bytes rather than
+twice that for a full square matrix. The rule that a cluster must span at least
+two frames is applied uniformly, including when only one path topology remains.
+
 ### 2. Visualize
 
 ```bash
-# Clustered medoids (supports vmd, pymol, chimera)
+# Clustered medoids (supports vmd, pymol, chimera, chimerax)
+gephyra visualize \
+  --data clustered_pathways.json --format chimerax --mode cluster \
+  --output cluster_medoids.cxc
+
 gephyra visualize \
   --data clustered_pathways.json --format vmd --mode cluster \
   --output cluster_medoids.tcl
@@ -155,13 +250,53 @@ gephyra visualize \
 
 | Option | Default | Description |
 |---|---|---|
-| `--data` | required | Input file. `--mode cluster` expects the `clustered_pathways.json` written by `cluster`; `--mode density` and `--mode frame` expect the `.jsonl` written by `calculate`. Passing the wrong one for the mode will not produce a useful script. |
-| `--format` | `vmd` | `vmd`, `pymol`, or `chimera`. |
+| `--data` | required | Input file. `--mode cluster` expects the `clustered_pathways.json` written by `cluster`; `--mode density` and `--mode frame` expect the `.jsonl` written by `calculate`. Passing the wrong one for the mode is detected and reported as an error. |
+| `--format` | `vmd` | `vmd` (`.tcl`), `pymol` (`.py`), `chimera` (legacy UCSF Chimera, `.py` + `.bild`) or `chimerax` (UCSF ChimeraX, `.cxc` + `.bild`, plus `.pb` in frame mode). |
 | `--mode` | `density` | `density` (all frames overlaid), `frame` (single frame), or `cluster` (clustered medoids). |
-| `--frame` | — | Frame index to visualize; required when `--mode frame`. |
+| `--frame` | — | Trajectory frame index to visualize with `--mode frame`. If omitted, or not present in the data (e.g. skipped by `--stride`), the first stored frame is used and a warning is logged. |
 | `--cluster_id` | — | Specific cluster ID to visualize by its sequential rank (only applies when `--mode cluster`). |
 | `--max_bond_draw_dist` | `6.0` | Maximum Euclidean distance in Å between two connected path atoms before the segment is treated as a periodic-boundary artifact and skipped. Should sit slightly above your `--coarse_cutoff`; the default is safe for the default cutoff of 4.5 Å. |
-| `--output` | `pathways_viz` | Output script filename or prefix. |
+| `--chimerax_model` | `#1` | ChimeraX model that holds your structure; atom selections and pseudobonds are scoped to it. Only used with `--format chimerax`. |
+| `--output` | `pathways_viz` | Output script filename or prefix. The viewer's extension is added if missing. |
+
+### Visualizing in UCSF ChimeraX
+
+`--format chimerax` writes a ChimeraX command script (`.cxc`) and a `.bild`
+geometry file next to it with the same name. In `frame` mode it also writes a
+`.pb` pseudobond file. Load your structure first, then open the script:
+
+```text
+open system.pdb
+open cluster_medoids.cxc
+```
+
+You can also drag the `.cxc` file onto the ChimeraX window. What each mode draws:
+
+| Mode | ChimeraX output |
+|---|---|
+| `cluster` | Each cluster medoid as cylinders and spheres in its own colour, with a 2D legend (`2dlabels`) giving the cluster ID, occupancy and size. Use `--cluster_id N` to draw a single cluster. |
+| `density` | Every path segment from every frame as thin, 70 % transparent cyan cylinders. |
+| `frame` | The path atoms of that frame are selected, shown as orange sticks, and drawn as static BILD geometry. They are also joined by dashed **pseudobonds**, which are attached to the atoms themselves. Load the trajectory onto the same model (for example `open traj.xtc structureModel #1`) and the pseudobonds follow the atoms as you play it. |
+
+How this differs from the legacy `chimera` output:
+
+- It is a plain command script, not Python run through `chimera.runCommand`.
+- Atoms are addressed with ChimeraX specs (`#1@@serial_number=N`) instead of a
+  Python loop over `openModels`.
+- BILD models open in scene coordinates, so no `matrixset` step is needed.
+- Transparency is set inside the BILD file.
+
+Atoms are matched by the serial numbers that `calculate` stores in `atom_ids`,
+i.e. the topology's atom IDs (PDB serials for a PDB topology). For this to work:
+
+- **Open the same structure the analysis used.** A pseudobond whose atom cannot
+  be found makes ChimeraX stop the script at that line.
+- **Keep the structure at model `#1`, or tell Gephyra where it is.** If it is
+  elsewhere, regenerate with `--chimerax_model '#2'`, for example. The specs are
+  scoped to that one model because an unscoped serial number would match an atom
+  in every open structure.
+- **Open a multi-model PDB trajectory as a single model.** Use
+  `open traj.pdb coordset true`, otherwise each MODEL becomes its own sub-model.
 
 ## Solvent naming conventions
 
@@ -256,16 +391,17 @@ not be reliably detected or visualised.
 scattered across a 10 000-frame trajectory receives the same
 occupancy score (0.01) as a path present in 100 consecutive frames.
 Only the latter constitutes a genuinely persistent structural feature.
-If persistence matters for your analysis, filter the `top_paths` output
-manually or apply the `--cluster` option, which groups paths by spatial
-similarity and reports per-cluster occupancy.
+If persistence matters for your analysis, run `gephyra cluster`, which groups
+paths by spatial similarity and reports per-cluster occupancy together with
+`mean_persistence_frames` and `max_persistence_frames` (the mean and longest
+runs of consecutive analysed frames).
 
 **Very large path counts.** The clustering step uses a hard maximum cap (`max_paths=60000`)
 and requires a fully merged cluster to appear in at least two frames to prevent memory
 bottlenecks and filter out raw thermal noise. For long trajectories with extreme branching,
 the clustering step may truncate the least frequent paths. Use
 `--stride` to reduce frame count or increase `--min_depth` to
-reduce the number of short paths before enabling `--cluster`.
+reduce the number of short paths before running `gephyra cluster`.
 
 
 ## Method and provenance

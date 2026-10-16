@@ -1,8 +1,12 @@
 import json
 import logging
 import os
+import re
 
 logger = logging.getLogger(__name__)
+
+VISUALIZE_FORMATS = ["vmd", "pymol", "chimera", "chimerax"]
+VISUALIZE_MODES = ["density", "frame", "cluster"]
 
 def read_cluster_json(data_file):
     with open(data_file, 'r') as f:
@@ -22,6 +26,46 @@ def read_jsonl(data_file):
                 frames[f_idx].extend(obj['paths'])
     return frames
 
+def _bild_path(output_file):
+    """BILD geometry file that accompanies a Chimera script: same stem, .bild suffix."""
+    return os.path.abspath(os.path.splitext(output_file)[0] + ".bild")
+
+def _resolve_frame(frames, frame_idx):
+    """
+    Returns the key of the frame to draw, or None if there are no frames.
+
+    A requested frame that is not in the data (e.g. skipped by --stride) falls
+    back to the first available frame with a warning, rather than silently.
+    """
+    if not frames:
+        return None
+    if frame_idx is not None and str(frame_idx) in frames:
+        return str(frame_idx)
+    first = next(iter(frames))
+    if frame_idx is not None:
+        available = sorted(int(k) for k in frames)
+        preview = ", ".join(str(k) for k in available[:10]) + (", ..." if len(available) > 10 else "")
+        logger.warning(f"Frame {frame_idx} not found in data (available: {preview}). Using frame {first} instead.")
+    return first
+
+def detect_data_kind(data_file):
+    """
+    'cluster' for a clustered_pathways.json (a JSON array), 'jsonl' for the
+    line-delimited output of `calculate`, or None if it cannot be told apart.
+    """
+    with open(data_file, 'r') as f:
+        while True:
+            ch = f.read(1)
+            if not ch:
+                return None
+            if not ch.isspace():
+                break
+    if ch == '[':
+        return 'cluster'
+    if ch == '{':
+        return 'jsonl'
+    return None
+
 def export_vmd_script(data_file, output_file="draw_pathways.tcl", mode="frame", frame_idx=None, cluster_id=None, max_bond_draw_dist=6.0):
     """
     Generates a Tcl script to visualize the network in VMD using dynamic selections.
@@ -30,8 +74,7 @@ def export_vmd_script(data_file, output_file="draw_pathways.tcl", mode="frame", 
         frames = read_jsonl(data_file)
         
     if mode == "frame":
-        if frame_idx is None or str(frame_idx) not in frames:
-            frame_idx = list(frames.keys())[0] if frames else None
+        frame_idx = _resolve_frame(frames, frame_idx)
 
         if frame_idx is None:
             logger.error("No frames available for visualization.")
@@ -44,7 +87,7 @@ def export_vmd_script(data_file, output_file="draw_pathways.tcl", mode="frame", 
         for path in paths:
             all_indices.update(path["nodes"])
 
-        indices_str = " ".join(str(i) for i in all_indices)
+        indices_str = " ".join(str(i) for i in sorted(all_indices))
 
         if not indices_str:
             logger.warning(f"No paths found for frame {frame_idx}. Skipping VMD script generation to prevent Tcl crash.")
@@ -155,8 +198,7 @@ def export_pymol_script(data_file, output_file="draw_pathways.py", mode="frame",
             f.write(f"obj.extend([SPHERE, {p[0]:.3f}, {p[1]:.3f}, {p[2]:.3f}, {radius:.3f}])\n")
 
         if mode == "frame":
-            if frame_idx is None or str(frame_idx) not in frames:
-                frame_idx = list(frames.keys())[0] if frames else None
+            frame_idx = _resolve_frame(frames, frame_idx)
 
             if frame_idx is None:
                 logger.error("No frames available for visualization.")
@@ -226,8 +268,7 @@ def export_chimera_script(data_file, output_file="draw_pathways.py", mode="frame
         frames = read_jsonl(data_file)
 
     if mode == "frame":
-        if frame_idx is None or str(frame_idx) not in frames:
-            frame_idx = list(frames.keys())[0] if frames else None
+        frame_idx = _resolve_frame(frames, frame_idx)
 
         if frame_idx is None:
             logger.error("No frames available for visualization.")
@@ -243,7 +284,7 @@ def export_chimera_script(data_file, output_file="draw_pathways.py", mode="frame
             else:
                 all_ids.update(i+1 for i in path["nodes"])
 
-        bild_file = os.path.abspath(output_file.replace('.py', '.bild'))
+        bild_file = _bild_path(output_file)
         with open(bild_file, 'w') as bild_f:
             bild_f.write('.color orange\n')
             for path in paths:
@@ -281,7 +322,7 @@ def export_chimera_script(data_file, output_file="draw_pathways.py", mode="frame
         logger.info(f"Chimera script written to {output_file} for frame {frame_idx} (BILD geometry: {bild_file})")
 
     elif mode == "density":
-        bild_file = os.path.abspath(output_file.replace('.py', '.bild'))
+        bild_file = _bild_path(output_file)
         with open(bild_file, 'w') as bild_f:
             bild_f.write('.color cyan\n')
             
@@ -311,7 +352,7 @@ def export_chimera_script(data_file, output_file="draw_pathways.py", mode="frame
                 logger.warning(f"Cluster ID {cluster_id} not found in data.")
                 return
 
-        bild_file = os.path.abspath(output_file.replace('.py', '.bild'))
+        bild_file = _bild_path(output_file)
         with open(bild_file, 'w') as bild_f:
             bild_f.write('.color orange\n')
 
@@ -344,9 +385,214 @@ def export_chimera_script(data_file, output_file="draw_pathways.py", mode="frame
         logger.info(f"Chimera cluster script written to {output_file} (BILD geometry: {bild_file})")
 
 
-def run_visualization(data_file, format="vmd", mode="density", frame_idx=None, cluster_id=None, output_file="pathways_viz", max_bond_draw_dist=6.0):
+# Categorical palette for distinguishing clusters (RGB in [0, 1]). Cycled when
+# there are more clusters than colours.
+CLUSTER_PALETTE = [
+    (1.00, 0.50, 0.00),  # orange
+    (0.12, 0.47, 0.71),  # blue
+    (0.17, 0.63, 0.17),  # green
+    (0.84, 0.15, 0.16),  # red
+    (0.58, 0.40, 0.74),  # purple
+    (0.55, 0.34, 0.29),  # brown
+    (0.89, 0.47, 0.76),  # pink
+    (0.50, 0.50, 0.50),  # grey
+    (0.74, 0.74, 0.13),  # olive
+    (0.09, 0.75, 0.81),  # cyan
+]
+
+def _rgb_hex(rgb):
+    return "#{:02x}{:02x}{:02x}".format(*(int(round(c * 255)) for c in rgb))
+
+def _segments(coords, max_bond_draw_dist):
+    """Consecutive (p1, p2) pairs of a path, skipping PBC-artifact segments."""
+    for p1, p2 in zip(coords[:-1], coords[1:]):
+        if sum((a - b) ** 2 for a, b in zip(p1, p2)) ** 0.5 > max_bond_draw_dist:
+            continue
+        yield p1, p2
+
+def _write_bild_path(f, coords, max_bond_draw_dist, cyl_radius, sphere_radius=None):
+    """Cylinders (and optionally spheres) for one path in BILD syntax."""
+    for p1, p2 in _segments(coords, max_bond_draw_dist):
+        f.write(f".cylinder {p1[0]:.3f} {p1[1]:.3f} {p1[2]:.3f} {p2[0]:.3f} {p2[1]:.3f} {p2[2]:.3f} {cyl_radius}\n")
+    if sphere_radius is not None:
+        for p in coords:
+            f.write(f".sphere {p[0]:.3f} {p[1]:.3f} {p[2]:.3f} {sphere_radius}\n")
+
+def _cxc_quote(path):
+    """Quote a file path for a ChimeraX command line."""
+    return '"' + path.replace('\\', '/').replace('"', '\\"') + '"'
+
+def _serial_spec(serials, model_spec):
+    """ChimeraX atom spec matching any of the given PDB serial numbers in one model."""
+    return " | ".join(f"{model_spec}@@serial_number={int(s)}" for s in serials)
+
+_MODEL_SPEC_RE = re.compile(r"^#\d+(\.\d+)*$")
+
+def validate_chimerax_model(model_spec):
+    """Raises ValueError unless model_spec is a ChimeraX model id such as '#1' or '#1.2'."""
+    if not isinstance(model_spec, str) or not _MODEL_SPEC_RE.match(model_spec.strip()):
+        raise ValueError(f"ChimeraX model must look like '#1' or '#1.2', got {model_spec!r}.")
+    return model_spec.strip()
+
+def export_chimerax_script(data_file, output_file="draw_pathways.cxc", mode="frame", frame_idx=None, cluster_id=None,
+                           max_bond_draw_dist=6.0, model_spec="#1"):
+    """
+    Generates a UCSF ChimeraX command script (.cxc) plus a .bild geometry file.
+
+    Differences from the legacy Chimera exporter, which drives Chimera's Python
+    API (`chimera.runCommand`, `matrixset`):
+      - Output is a plain ChimeraX command file, opened with `open file.cxc` or
+        by dragging it onto the ChimeraX window. No Python is involved.
+      - Atoms are addressed with the ChimeraX attribute spec
+        `@@serial_number=N` instead of iterating `openModels` in Python.
+      - BILD models open in scene coordinates, so they overlay the structure
+        without `matrixset`; transparency is set inside the BILD file.
+      - In 'frame' mode a .pb pseudobond file is written as well. Its bonds
+        connect the path atoms themselves, so they follow the atoms if the
+        trajectory is loaded and played, unlike the static BILD cylinders.
+      - In 'cluster' mode each cluster gets its own colour and a 2D legend
+        (`2dlabels`) lists cluster id, occupancy and size.
+
+    Serial numbers are the `atom_ids` stored by `calculate` (the topology's
+    atom ids, i.e. PDB serials when the topology is a PDB). Atom specs are
+    scoped to `model_spec` (default '#1', the first structure opened): an
+    unscoped serial number would match one atom in every open structure, and a
+    pseudobond line must resolve to exactly one atom per end.
+    """
+    model_spec = validate_chimerax_model(model_spec)
+    stem = os.path.splitext(output_file)[0]
+    bild_file = os.path.abspath(stem + ".bild")
+    header = [
+        f"# Gephyra ChimeraX script ({mode} mode) generated from {os.path.basename(data_file)}",
+        "# Open your structure first (e.g. 'open system.pdb'), then 'open " + os.path.basename(output_file) + "'.",
+        f"# Atoms are addressed in model {model_spec}; regenerate with --chimerax_model if your structure is elsewhere.",
+        "# For a multi-model PDB trajectory use 'open traj.pdb coordset true' so it loads as one model.",
+    ]
+
+    if mode in ["frame", "density"]:
+        frames = read_jsonl(data_file)
+
+    if mode == "frame":
+        frame_idx = _resolve_frame(frames, frame_idx)
+        if frame_idx is None:
+            logger.error("No frames available for visualization.")
+            return
+        paths = frames[str(frame_idx)]
+        if not paths:
+            logger.warning(f"No paths found for frame {frame_idx}. Skipping ChimeraX script generation.")
+            return
+
+        def serials_of(path):
+            if "atom_ids" in path:
+                return [int(i) for i in path["atom_ids"]]
+            return [int(i) + 1 for i in path["nodes"]]
+
+        all_serials = sorted({s for path in paths for s in serials_of(path)})
+        pairs = []
+        seen = set()
+        for path in paths:
+            ser = serials_of(path)
+            for (a, b), (p1, p2) in zip(zip(ser[:-1], ser[1:]), zip(path["coords"][:-1], path["coords"][1:])):
+                key = (min(a, b), max(a, b))
+                if key in seen:
+                    continue
+                if sum((x - y) ** 2 for x, y in zip(p1, p2)) ** 0.5 > max_bond_draw_dist:
+                    continue  # PBC artifact
+                seen.add(key)
+                pairs.append(key)
+
+        with open(bild_file, 'w') as bf:
+            bf.write(f".comment Gephyra pathways, frame {frame_idx}\n")
+            bf.write(".color 1.0 0.5 0.0\n")
+            for path in paths:
+                _write_bild_path(bf, path["coords"], max_bond_draw_dist, 0.2, 0.3)
+
+        pb_file = os.path.abspath(stem + ".pb")
+        with open(pb_file, 'w') as pf:
+            pf.write("; halfbond = false\n; color = orange\n; radius = 0.15\n; dashes = 6\n")
+            for a, b in pairs:
+                pf.write(f"{model_spec}@@serial_number={a} {model_spec}@@serial_number={b}\n")
+
+        chunk = 50
+        with open(output_file, 'w') as f:
+            f.write("\n".join(header) + "\n")
+            f.write(f"# Frame {frame_idx}: {len(paths)} paths, {len(all_serials)} atoms.\n")
+            for i in range(0, len(all_serials), chunk):
+                verb = "select" if i == 0 else "select add"
+                f.write(f"{verb} {_serial_spec(all_serials[i:i + chunk], model_spec)}\n")
+            f.write("show sel atoms\nstyle sel stick\ncolor sel orange\nselect clear\n")
+            f.write(f"open {_cxc_quote(bild_file)} name gephyra_frame_{frame_idx}\n")
+            f.write("# Dynamic pseudobonds between the same atoms (they follow a loaded trajectory).\n")
+            f.write("# Requires the structure to be open; comment out if it is not.\n")
+            f.write(f"open {_cxc_quote(pb_file)}\n")
+        logger.info(f"ChimeraX script written to {output_file} for frame {frame_idx} "
+                    f"(BILD: {bild_file}, pseudobonds: {pb_file})")
+
+    elif mode == "density":
+        with open(bild_file, 'w') as bf:
+            bf.write(".comment Gephyra density overlay (all frames)\n")
+            bf.write(".color 0.0 0.8 0.8\n.transparency 0.7\n")
+            for paths in frames.values():
+                for path in paths:
+                    _write_bild_path(bf, path["coords"], max_bond_draw_dist, 0.1)
+        with open(output_file, 'w') as f:
+            f.write("\n".join(header) + "\n")
+            f.write(f"open {_cxc_quote(bild_file)} name gephyra_density\n")
+        logger.info(f"ChimeraX density script written to {output_file} (BILD: {bild_file})")
+
+    elif mode == "cluster":
+        clusters = read_cluster_json(data_file)
+        if cluster_id is not None:
+            clusters = [c for c in clusters if c.get("cluster_id") == cluster_id]
+            if not clusters:
+                logger.warning(f"Cluster ID {cluster_id} not found in data.")
+                return
+
+        legend = []
+        with open(bild_file, 'w') as bf:
+            for n, cluster in enumerate(clusters):
+                coords = cluster.get("medoid_coords", [])
+                if len(coords) < 2:
+                    continue
+                rgb = CLUSTER_PALETTE[n % len(CLUSTER_PALETTE)]
+                cid = cluster.get("cluster_id", n + 1)
+                bf.write(f".comment Cluster {cid}: medoid extracted from frame {cluster.get('medoid_frame', 'unknown')}\n")
+                bf.write(f".color {rgb[0]:.2f} {rgb[1]:.2f} {rgb[2]:.2f}\n")
+                _write_bild_path(bf, coords, max_bond_draw_dist, 0.2, 0.3)
+                legend.append((cid, rgb, cluster.get("occupancy"), cluster.get("size")))
+
+        with open(output_file, 'w') as f:
+            f.write("\n".join(header) + "\n")
+            f.write(f"open {_cxc_quote(bild_file)} name gephyra_clusters\n")
+            f.write("2dlabels delete\n")
+            for row, (cid, rgb, occ, size) in enumerate(legend[:20]):
+                occ_txt = f"occ {occ:.2f}" if isinstance(occ, (int, float)) else ""
+                size_txt = f"n={size}" if size is not None else ""
+                text = f"Cluster {cid}  {occ_txt}  {size_txt}".strip()
+                ypos = 0.95 - 0.04 * row
+                f.write(f'2dlabels text "{text}" color {_rgb_hex(rgb)} xpos 0.02 ypos {ypos:.2f} size 14\n')
+            if len(legend) > 20:
+                f.write(f"# Legend truncated: {len(legend) - 20} more clusters are drawn but not labelled.\n")
+        logger.info(f"ChimeraX cluster script written to {output_file} (BILD: {bild_file})")
+
+
+def run_visualization(data_file, format="vmd", mode="density", frame_idx=None, cluster_id=None, output_file="pathways_viz", max_bond_draw_dist=6.0,
+                      chimerax_model="#1"):
     if not os.path.exists(data_file):
         logger.error(f"Data file {data_file} not found.")
+        return
+
+    # Catch the most common mistake (passing results.jsonl to --mode cluster,
+    # or clustered_pathways.json to density/frame) with an actionable message
+    # instead of a JSON decode traceback or an empty script.
+    kind = detect_data_kind(data_file)
+    if mode == "cluster" and kind == "jsonl":
+        logger.error(f"--mode cluster expects the JSON written by 'gephyra cluster', but {data_file} "
+                     "looks like the .jsonl written by 'gephyra calculate'. Run 'gephyra cluster' first.")
+        return
+    if mode in ("frame", "density") and kind == "cluster":
+        logger.error(f"--mode {mode} expects the .jsonl written by 'gephyra calculate', but {data_file} "
+                     "looks like a clustered_pathways.json. Use --mode cluster for that file.")
         return
 
     # Append appropriate extension based on format if not provided by user
@@ -354,6 +600,8 @@ def run_visualization(data_file, format="vmd", mode="density", frame_idx=None, c
         out = f"{output_file}.tcl"
     elif format in ["pymol", "chimera"] and not output_file.endswith(".py"):
         out = f"{output_file}.py"
+    elif format == "chimerax" and not output_file.endswith(".cxc"):
+        out = f"{output_file}.cxc"
     else:
         out = output_file
 
@@ -363,5 +611,8 @@ def run_visualization(data_file, format="vmd", mode="density", frame_idx=None, c
         export_pymol_script(data_file, output_file=out, mode=mode, frame_idx=frame_idx, cluster_id=cluster_id, max_bond_draw_dist=max_bond_draw_dist)
     elif format == "chimera":
         export_chimera_script(data_file, output_file=out, mode=mode, frame_idx=frame_idx, cluster_id=cluster_id, max_bond_draw_dist=max_bond_draw_dist)
+    elif format == "chimerax":
+        export_chimerax_script(data_file, output_file=out, mode=mode, frame_idx=frame_idx, cluster_id=cluster_id,
+                               max_bond_draw_dist=max_bond_draw_dist, model_spec=chimerax_model)
     else:
         logger.error(f"Unknown format: {format}")

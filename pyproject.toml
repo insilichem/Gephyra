@@ -1,24 +1,40 @@
 [build-system]
-requires = ["setuptools>=42", "wheel"]
+requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "gephyra"
-version = "0.1.0"
+dynamic = ["version"]
 description = "A hybrid algorithm for open-ended, water-mediated hydrogen-bond network detection."
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
 authors = [
-    {name = "Your Name", email = "your.email@example.com"}
+    {name = "María Fernanda Peralta-Morales"},
+    {name = "Giuseppe Sciortino"},
+    {name = "Jean-Didier Maréchal"},
 ]
 dependencies = [
     "MDAnalysis>=2.0.0",
     "networkx>=2.0",
     "numpy>=1.20.0",
     "scipy>=1.5.0",
-    "similaritymeasures>=0.4.4"
 ]
+
+[project.optional-dependencies]
+# similaritymeasures is only used by the test suite, as an independent
+# reference implementation of the discrete Fréchet distance.
+test = ["pytest", "similaritymeasures>=0.4.4"]
+
+[project.urls]
+Homepage = "https://github.com/insilichem/Gephyra"
 
 [project.scripts]
 gephyra = "gephyra.cli:main"
+gephyra-gui = "gephyra.gui:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "gephyra._version.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

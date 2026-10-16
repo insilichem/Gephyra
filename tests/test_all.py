@@ -196,11 +196,11 @@ class TestVisualization(unittest.TestCase):
             json_name = f_json.name
             f_json.write('{"type": "metadata", "n_frames_analyzed": 1}\n')
             # Path 1
-            f_json.write('{"type": "frame", "frame_idx": 0, "paths": [{"nodes": [0, 1], "coords": [[0,0,0], [1,1,1]], "probability": 1.0}]}\n')
+            f_json.write('{"type": "frame", "frame_idx": 0, "paths": [{"nodes": [0, 1], "coords": [[0,0,0], [1,1,1]], "hquality": 1.0}]}\n')
             # Path 2
-            f_json.write('{"type": "frame", "frame_idx": 0, "paths": [{"nodes": [0, 2], "coords": [[0,0,0], [2,2,2]], "probability": 1.0}]}\n')
+            f_json.write('{"type": "frame", "frame_idx": 0, "paths": [{"nodes": [0, 2], "coords": [[0,0,0], [2,2,2]], "hquality": 1.0}]}\n')
             # Path 3
-            f_json.write('{"type": "frame", "frame_idx": 0, "paths": [{"nodes": [0, 3], "coords": [[0,0,0], [3,3,3]], "probability": 1.0}]}\n')
+            f_json.write('{"type": "frame", "frame_idx": 0, "paths": [{"nodes": [0, 3], "coords": [[0,0,0], [3,3,3]], "hquality": 1.0}]}\n')
 
         # Test bypass logic: coarse_trigger=5 (we have 3 paths, so 3 <= 5 -> bypass)
         with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as f_out:
@@ -256,7 +256,7 @@ class TestFixtureClustering(unittest.TestCase):
         frames = [o for o in objs if o["type"] == "frame"]
         self.assertEqual(len(frames), objs[0]["n_frames_analyzed"])
         for p in frames[0]["paths"]:
-            for key in ("nodes", "atom_ids", "coords", "probability", "length", "avg_oo_dist"):
+            for key in ("nodes", "atom_ids", "coords", "hquality", "hquality_norm", "length", "avg_oo_dist"):
                 self.assertIn(key, p)
             self.assertEqual(len(p["atom_ids"]), len(p["nodes"]))
             self.assertEqual(p["length"], len(p["nodes"]) - 1)
