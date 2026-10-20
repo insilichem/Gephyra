@@ -15,7 +15,7 @@ authors = [
     {name = "Jean-Didier Maréchal"},
 ]
 dependencies = [
-    "MDAnalysis>=2.0.0",
+    "MDAnalysis>=2.1.0",
     "networkx>=2.0",
     "numpy>=1.20.0",
     "scipy>=1.5.0",

@@ -1,5 +1,6 @@
 import contextlib
 import json
+import os
 import logging
 import csv
 import copy
@@ -8,6 +9,8 @@ import numpy as np
 
 from .core import build_graph, compute_edge_probabilities, traverse_network
 from .math_utils import pairwise_discrete_frechet, condensed_submatrix, normalize_hquality
+from .scene import minimum_image_chain
+from .results import load_clusters  # noqa: F401  (re-exported for convenience)
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +25,21 @@ def path_hquality(path):
     if 'hquality' in path:
         return float(path['hquality'])
     return float(path['probability'])
+
+def _write_clusters(output_file, clusters, source_metadata, cluster_params):
+    """
+    Writes the cluster summary as {"type", "metadata", "clusters"}.
+
+    `metadata` carries the analysed system (topology, trajectory, selections)
+    from the .jsonl, so `visualize` can rebuild the molecular scene from the
+    cluster file alone. Readers should use `results.load_clusters`, which also accepts
+    the plain list written by Gephyra < 0.4.
+    """
+    metadata = {k: v for k, v in source_metadata.items() if k != "type"}
+    metadata["clustering"] = cluster_params
+    with open(output_file, 'w') as f:
+        json.dump({"type": "gephyra_clusters", "metadata": metadata, "clusters": clusters}, f, indent=2)
+
 
 def compute_persistence(frame_indices_sorted, total_frames, stride):
     """
@@ -71,6 +89,10 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
         raise ValueError(f"threshold must be positive, got {threshold}.")
 
     unique_paths = {}
+    source_metadata = {}
+    cluster_params = {"data_file": os.path.abspath(data_file), "threshold": threshold,
+                      "coarse_threshold": coarse_threshold, "coarse_trigger": coarse_trigger,
+                      "max_paths": max_paths}
     total_frames = 0
     stride = 1
     frame_set = set()
@@ -81,6 +103,7 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
             if not line.strip(): continue
             obj = json.loads(line)
             if obj.get('type') == 'metadata':
+                source_metadata = obj
                 total_frames = obj.get('n_frames_analyzed', 0)
                 stride = obj.get('parameters', {}).get('stride', 1)
             elif obj.get('type') == 'frame':
@@ -116,9 +139,8 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
 
     if not unique_paths:
         logger.info("No paths found to cluster.")
-        with open(output_file, 'w') as f:
-            json.dump([], f, indent=2)
-        return
+        _write_clusters(output_file, [], source_metadata, cluster_params)
+        return {'output_file': os.path.abspath(output_file), 'n_clusters': 0}
 
     # Build candidate list — all unique paths proceed to spatial clustering.
     filtered_paths = []
@@ -141,9 +163,8 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
 
     if n_filtered == 0:
         logger.info("No paths available for clustering.")
-        with open(output_file, 'w') as f:
-            json.dump([], f, indent=2)
-        return
+        _write_clusters(output_file, [], source_metadata, cluster_params)
+        return {'output_file': os.path.abspath(output_file), 'n_clusters': 0}
 
     # Memory Safety Cap
     if n_filtered > max_paths:
@@ -214,9 +235,8 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
         # fewer than two frames is thermal noise.
         if len(frames_val) < 2:
             logger.info("The only remaining path occurs in fewer than 2 frames; discarded as thermal noise.")
-            with open(output_file, 'w') as f:
-                json.dump([], f, indent=2)
-            return
+            _write_clusters(output_file, [], source_metadata, cluster_params)
+            return {'output_file': os.path.abspath(output_file), 'n_clusters': 0}
 
         medoid_frame = int(min(frames_val))
         mean_pers, max_pers = compute_persistence(sorted(frames_val), total_frames, stride)
@@ -230,11 +250,11 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
             "medoid_frame": medoid_frame,
             "mean_persistence_frames": mean_pers,
             "max_persistence_frames": max_pers,
+            "medoid_nodes": [int(n) for n in filtered_paths[0]['nodes']],
             "medoid_coords": filtered_paths[0]['coords']
         }]
-        with open(output_file, 'w') as f:
-            json.dump(clusters_data, f, indent=2)
-        return
+        _write_clusters(output_file, clusters_data, source_metadata, cluster_params)
+        return {'output_file': os.path.abspath(output_file), 'n_clusters': 1}
 
     logger.info(f"Computing Fréchet distance matrix for {n_filtered} unique pathways...")
 
@@ -330,6 +350,9 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
             "medoid_frame": medoid_frame,
             "mean_persistence_frames": mean_pers,
             "max_persistence_frames": max_pers,
+            # Atom indices of the medoid path at medoid_frame (the frame its
+            # coordinates come from); lets `visualize` rebuild it as molecules.
+            "medoid_nodes": [int(n) for n in medoid_path['nodes']],
             "medoid_coords": medoid_coords
         })
 
@@ -340,10 +363,10 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
     for i, cluster in enumerate(clusters_data):
         cluster["cluster_id"] = i + 1
 
-    with open(output_file, 'w') as f:
-        json.dump(clusters_data, f, indent=2)
+    _write_clusters(output_file, clusters_data, source_metadata, cluster_params)
 
     logger.info(f"Clustering complete. Results saved to {output_file}")
+    return {'output_file': os.path.abspath(output_file), 'n_clusters': len(clusters_data)}
 
 
 def validate_calculation_parameters(stride=1, max_depth=10, min_depth=1, cooperativity=0.92, coarse_cutoff=4.5):
@@ -404,14 +427,19 @@ def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resna
     """
     validate_calculation_parameters(stride=stride, max_depth=max_depth, min_depth=min_depth,
                                     cooperativity=cooperativity, coarse_cutoff=coarse_cutoff)
+    if not traj_file:
+        # A topology alone is not enough: many formats (.prmtop, .psf, .tpr
+        # without coordinates) carry no positions at all, which used to fail
+        # deep inside MDAnalysis with an unhelpful error.
+        raise ValueError("A trajectory file is required (e.g. .xtc, .dcd, .nc). To analyse a single "
+                         "structure, pass a coordinate file such as a .pdb as the trajectory.")
+    for label, path in (("Topology", topo_file), ("Trajectory", traj_file)):
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"{label} file not found: {path}")
 
     logger.info(f"Loading topology: {topo_file}")
-
-    # Load universe
-    if traj_file:
-        u = mda.Universe(topo_file, traj_file)
-    else:
-        u = mda.Universe(topo_file)
+    logger.info(f"Loading trajectory: {traj_file}")
+    u = mda.Universe(topo_file, traj_file)
 
     n_frames = len(u.trajectory)
 
@@ -451,6 +479,7 @@ def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resna
 
         found_large_path, total_paths, total_discarded, total_length_sum, total_hquality_sum = _process_trajectory(
             u, water_atoms, root_atoms, out_f, csv_writer, path_frequency,
+            topo_file=os.path.abspath(topo_file), traj_file=os.path.abspath(traj_file),
             root_sel=root_sel, water_sel=water_sel, stride=stride, max_depth=max_depth,
             min_depth=min_depth, prob_threshold=prob_threshold, cooperativity=cooperativity,
             coarse_cutoff=coarse_cutoff, total_processed=total_processed,
@@ -493,12 +522,19 @@ def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resna
             output_file=cluster_output,
         )
 
-    return None
+    return {
+        "output_file": os.path.abspath(output_file),
+        "csv_file": os.path.abspath(csv_file) if csv_file else None,
+        "n_frames": total_processed,
+        "n_paths": total_paths,
+        "avg_length": avg_length,
+    }
 
 
 def _process_trajectory(u, water_atoms, root_atoms, out_f, csv_writer, path_frequency, *,
                         root_sel, water_sel, stride, max_depth, min_depth, prob_threshold,
-                        cooperativity, coarse_cutoff, total_processed, progress_callback=None):
+                        cooperativity, coarse_cutoff, total_processed, progress_callback=None,
+                        topo_file=None, traj_file=None):
     """
     Frame loop of run_analysis: writes the metadata line, one line per frame
     and the trailing path_statistics line to `out_f`.
@@ -518,6 +554,10 @@ def _process_trajectory(u, water_atoms, root_atoms, out_f, csv_writer, path_freq
     metadata = {
         "type": "metadata",
         "n_frames_analyzed": total_processed,
+        # Absolute paths of the analysed system, so `visualize` can rebuild the
+        # molecular context (protein, ligand, waters) without asking again.
+        "topo_file": topo_file,
+        "traj_file": traj_file,
         "parameters": {
             "root_sel": root_sel,
             "water_sel": water_sel,
@@ -563,12 +603,11 @@ def _process_trajectory(u, water_atoms, root_atoms, out_f, csv_writer, path_freq
             path_tuple = tuple(int(n) for n in path_indices)
             path_frequency.setdefault(path_tuple, set()).add(frame_idx)
 
-            coords = []
-            distances = []
-            for i, node_idx in enumerate(path_indices):
-                coords.append(u.atoms[node_idx].position.tolist())
-                if i > 0:
-                    distances.append(g[path_indices[i-1]][node_idx]['dist'])
+            # Each atom is placed in the periodic image nearest to the previous
+            # one, starting from the root, so stored paths are never torn
+            # across the box (clustering and drawing both use these).
+            coords = minimum_image_chain(u.atoms[list(path_indices)].positions, ts.dimensions).tolist()
+            distances = [g[a][b]['dist'] for a, b in zip(path_indices[:-1], path_indices[1:])]
 
             avg_oo = float(np.mean(distances)) if distances else 0.0
 

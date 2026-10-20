@@ -57,7 +57,7 @@ def build_parser():
     # --- Calculate Subcommand ---
     calc_parser = subparsers.add_parser("calculate", help="Analyze trajectory to find water networks.")
     calc_parser.add_argument("--topo", required=True, help="Topology file (e.g., .pdb, .tpr).")
-    calc_parser.add_argument("--traj", required=False, help="Trajectory file (e.g., .xtc, .dcd). If not provided, evaluates only topology.")
+    calc_parser.add_argument("--traj", required=True, help="Trajectory file (e.g., .xtc, .dcd, .nc). To analyse a single structure, pass a coordinate file such as a .pdb.")
     calc_parser.add_argument("--root", required=True, help="MDAnalysis selection string for the root atoms (e.g., 'resname LIG').")
     calc_parser.add_argument("--water", default="resname SOL or resname WAT or resname HOH", help="MDAnalysis selection string for water.")
     calc_parser.add_argument("--stride", type=_positive_int, default=1, help="Frame stride for trajectory processing.")
@@ -108,9 +108,21 @@ def build_parser():
     vis_parser.add_argument("--frame", type=int, default=None, help="Frame index to visualize (only used if mode='frame').")
     vis_parser.add_argument("--cluster_id", type=int, default=None, help="Specific cluster ID to visualize (only used if mode='cluster'). If None, visualizes all clusters.")
     vis_parser.add_argument("--output", default="pathways_viz", help="Output script file name or prefix.")
-    vis_parser.add_argument("--chimerax_model", type=_chimerax_model, default="#1",
-        help="ChimeraX model holding your structure (only used with --format chimerax). Atom "
-             "selections and pseudobonds are scoped to it. Default: #1, the first model opened.")
+    vis_parser.add_argument("--chimerax_model", type=_chimerax_model, default=None,
+        help="ChimeraX model id (only used with --format chimerax). With a molecular scene, the id the "
+             "script opens the structure at (default #101; geometry and bridges use the next two ids). "
+             "Geometry-only scripts address the structure you opened yourself (default #1).")
+    vis_parser.add_argument("--topo", default=None,
+        help="Topology of the analysed system. Defaults to the one recorded in the data file "
+             "(Gephyra >= 0.4); needed for older files to include the protein and waters.")
+    vis_parser.add_argument("--traj", default=None, help="Trajectory of the analysed system (see --topo).")
+    vis_parser.add_argument("--context", default=None,
+        help="MDAnalysis selection of the solute shown around the network. "
+             "Default: everything except solvent and common counter-ions.")
+    vis_parser.add_argument("--top_clusters", type=_positive_int, default=None,
+        help="Cluster mode: draw only the N most occupied clusters (default: all).")
+    vis_parser.add_argument("--no_structure", action="store_true",
+        help="Write geometry only (no structure snapshot); load the structure in the viewer yourself.")
     vis_parser.add_argument("--max_bond_draw_dist", type=_positive_float, default=6.0,
         help="Maximum Euclidean distance (Å) between two connected path atoms "
              "before the cylinder is treated as a PBC artifact and skipped. "
@@ -143,11 +155,11 @@ def main(argv=None):
         return gui_main()
 
     try:
-        _dispatch(args)
+        ok = _dispatch(args)
     except (ValueError, FileNotFoundError) as exc:
         logger.error(str(exc))
         return 1
-    return 0
+    return 0 if ok is not False else 1
 
 def _dispatch(args):
     if args.command == "calculate":
@@ -179,7 +191,7 @@ def _dispatch(args):
         )
         
     elif args.command == "visualize":
-        run_visualization(
+        return run_visualization(
             data_file=args.data,
             format=args.format,
             mode=args.mode,
@@ -187,8 +199,13 @@ def _dispatch(args):
             cluster_id=args.cluster_id,
             output_file=args.output,
             max_bond_draw_dist=args.max_bond_draw_dist,
-            **({"chimerax_model": args.chimerax_model} if args.format == "chimerax" else {}),
-        )
+            chimerax_model=args.chimerax_model,
+            with_structure=not args.no_structure,
+            topo_file=args.topo,
+            traj_file=args.traj,
+            context_sel=args.context,
+            top_clusters=args.top_clusters,
+        ) is not None
 
 if __name__ == "__main__":
     sys.exit(main())
