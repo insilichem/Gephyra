@@ -69,13 +69,22 @@ venv.bak/
 # NOTE: do not add a blanket "*.py" rule here. It silently prevents new source
 # files under src/ and tests/ from ever being staged. Generated visualization
 # scripts are matched by name or prefix instead.
-results.json
-results.jsonl
-clustered_pathways.json
+# - calculate: any .jsonl results file and the optional CSV summary
+*.jsonl
+results*.json
+results*.csv
+summary*.csv
+# - cluster: cluster files, whatever suffix they are given
+clustered_pathways*.json
+# - visualize: scripts, geometry, pseudobonds and structure snapshots
 *.tcl
+*.cxc
 *.bild
+*.pb
+*_structure.pdb
 pathways_viz*
 cluster_medoids*.py
+cluster_scene*.py
 network_density*.py
 frame_*.py
 

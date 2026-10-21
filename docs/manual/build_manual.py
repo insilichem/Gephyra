@@ -48,8 +48,8 @@ SCREENSHOTS = {
     "05_clustering_done.png": "The confirmation shown when clustering finishes.",
     "06_visualization.png": "Step 3, Visualization: viewer, mode and the molecular-scene section.",
     "07_script_ready.png": "The 'Script ready' confirmation with the command that opens the script.",
-    "08_scene_frame.png": "A frame scene in ChimeraX: protein cartoon, ligand, water molecules and dashed water bridges.",
-    "09_scene_clusters.png": "A cluster scene: colour-coded medoid paths around the protein, with the legend.",
+    "08_scene_frame.png": "A frame scene in ChimeraX: protein cartoon, ligand, water molecules and dashed water bridges (hypothetical example system).",
+    "09_scene_clusters.png": "A cluster scene: colour-coded medoid paths around the protein, with the legend (hypothetical example system).",
     "10_light_theme.png": "The same window in the light theme.",
 }
 
