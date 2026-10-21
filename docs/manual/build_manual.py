@@ -39,13 +39,17 @@ LINE = colors.HexColor("#d6dde5")
 # file name -> what the screenshot should show (also the placeholder text)
 SCREENSHOTS = {
     "01_overview.png": "The main window: sidebar with the three steps and the output folder, the form, the progress bar and the log.",
+    "01b_output_folder.png": "Choosing the output folder with Change... in the sidebar.",
     "02_analysis.png": "Step 1, Pathway Analysis, filled in with a topology, a trajectory and a root selection.",
+    "02b_analysis_running.png": "While the analysis runs: the progress bar counts frames and the log streams messages.",
     "03_analysis_done.png": "The confirmation shown when the analysis finishes, listing the saved files and their folder.",
     "04_clustering.png": "Step 2, Clustering, with the pathway data filled in from step 1.",
+    "04b_clustering_running.png": "While clustering runs: progress through the Frechet distance matrix.",
     "05_clustering_done.png": "The confirmation shown when clustering finishes.",
     "06_visualization.png": "Step 3, Visualization: viewer, mode and the molecular-scene section.",
     "07_script_ready.png": "The 'Script ready' confirmation with the command that opens the script.",
     "08_scene_frame.png": "A frame scene in ChimeraX: protein cartoon, ligand, water molecules and dashed water bridges.",
+    "08b_scene_closeup.png": "Close-up of the frame scene: water molecules bridging from the ligand's root oxygen.",
     "09_scene_clusters.png": "A cluster scene: colour-coded medoid paths around the protein, with the legend.",
     "10_light_theme.png": "The same window in the light theme.",
 }
@@ -272,6 +276,7 @@ def story():
           P("Output fields such as <i>Results file</i> or <i>Script name</i> hold file <b>names</b>, which are saved "
             "inside the output folder shown in the sidebar. Type an absolute path in a field to save that file "
             "somewhere else. If the output folder does not exist, the interface offers to create it."),
+          screenshot("01b_output_folder.png", width=12 * cm),
           P("After a step finishes, its confirmation window lists every saved file with its folder, and offers "
             "<b>Open folder</b> and <b>Save a copy to...</b>, so results can also be stored in another location "
             "after the calculation."),
@@ -298,6 +303,7 @@ def story():
                 [3.4 * cm, 10.1 * cm, 3.0 * cm]),
           tip("For a first look at a long trajectory, start with a stride of 10-50. The analysis time grows with the "
               "number of frames and with Max depth."),
+          screenshot("02b_analysis_running.png", width=14 * cm),
           P("Click <b>Run analysis</b>. The progress bar counts the frames; when it finishes, a confirmation reports "
             "how many water-bridge paths were found and where the files were saved. Click <b>Next: Clustering</b> "
             "to continue: the results file is already filled in on the next step."),
@@ -317,6 +323,7 @@ def story():
                  ["Max paths", "Memory cap: beyond this, only the most frequent paths are clustered.", "60000"],
                  ["Cluster file", "Name of the cluster file in the output folder.", "clustered_pathways.json"]],
                 [3.4 * cm, 10.1 * cm, 3.0 * cm]),
+          screenshot("04b_clustering_running.png", width=14 * cm),
           P("Click <b>Run clustering</b>. When it finishes, a confirmation window reports how many channels were "
             "identified and lists the saved file. <b>Next: Visualization</b> opens step 3 with the cluster file "
             "already selected."),
@@ -366,6 +373,7 @@ def story():
             "in Extensions > Tk Console instead.", "tip"),
           P("Running a script again replaces the previous Gephyra scene."),
           screenshot("08_scene_frame.png"),
+          screenshot("08b_scene_closeup.png", width=13 * cm),
           screenshot("09_scene_clusters.png"),
           ]
 
