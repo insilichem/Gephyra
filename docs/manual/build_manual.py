@@ -217,7 +217,7 @@ def story():
 
     s += [H1("2. Installation and start-up"),
           H2("Requirements"),
-          *bullets(["<b>Python 3.11</b>, in a dedicated conda environment (below). Using a separate environment "
+          *bullets(["<b>Python 3.10 or newer; 3.11 recommended</b>, in a dedicated conda environment (below). Using a separate environment "
                     "keeps the Python version and libraries Gephyra needs from clashing with other software, such "
                     "as a PyMOL installation that ships its own Python.",
                     "Conda (Miniconda, Miniforge or Anaconda) to create that environment.",

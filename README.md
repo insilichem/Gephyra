@@ -98,7 +98,7 @@ Gephyra (derived from the Ancient Greek word for "bridge") is a network-graph an
 
 ## Installation
 
-Gephyra requires **Python 3.11**. Install it in a dedicated conda environment,
+Gephyra requires **Python 3.10 or newer; 3.11 is recommended**. Install it in a dedicated conda environment,
 so that the Python version and the libraries it needs do not clash with other
 software on your machine (for example a PyMOL installation, which ships its own
 Python):

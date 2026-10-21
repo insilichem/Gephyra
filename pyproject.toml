@@ -7,7 +7,7 @@ name = "gephyra"
 dynamic = ["version"]
 description = "A hybrid algorithm for open-ended, water-mediated hydrogen-bond network detection."
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "María Fernanda Peralta-Morales"},
