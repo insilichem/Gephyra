@@ -31,6 +31,16 @@ placeholder frames, and the build lists them.
 
 PNG at the window's native size works best; images are scaled to the page width.
 
+## Scene figures
+
+`08_scene_frame.png` and `09_scene_clusters.png` show a purely hypothetical system (an idealised
+four-helix bundle, a made-up ligand `LIG` and a water box). They are regenerated, end to end through the
+real Gephyra pipeline, with:
+
+```bash
+python docs/manual/example/make_scene_figures.py   # needs PyMOL's Python module, MDAnalysis and chimerax
+```
+
 ## Video
 
 Set `VIDEO_URL` at the top of `build_manual.py` to link the walkthrough video in section 10.
