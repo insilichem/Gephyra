@@ -145,7 +145,7 @@ class TestPipelineScenes(_Tmp):
             "chimerax": ["close #101-103", "id 101", "show #101/Y,W", ".pb\" id 103"],
             "chimera": ["openModels.open(r'", "getPseudoBondGroup", "newPseudoBond"],
             "pymol": ["cmd.load(r'", "cmd.distance('gephyra_bridges'", "cmd.unbond("],
-            "vmd": ["mol new {", "style dashed", "Licorice"],
+            "vmd": ["mol new {", "style dashed", "Licorice", "# Run it with: vmd -e vmd.tcl", "The -e is required"],
         }
         for fmt, needles in expect.items():
             with self.subTest(fmt=fmt):

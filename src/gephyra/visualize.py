@@ -285,6 +285,8 @@ def _header(comment, plan, fmt, output_file):
     script = os.path.basename(output_file)
     lines = [f"Gephyra {fmt} script: {plan.title} ({plan.mode} mode), from {plan.source}",
              "Run it with: " + USAGE[fmt].format(script=script)]
+    if fmt == "vmd":
+        lines.append(f"The -e is required: 'vmd {script}' makes VMD read this file as a molecule and nothing is drawn.")
     if plan.scene:
         lines.append(f"Loads the structure snapshot itself: {plan.scene.pdb_path} (frame {plan.scene.frame}).")
     else:

@@ -68,8 +68,8 @@ MONO_FONTS = ("JetBrains Mono", "Fira Code", "Ubuntu Mono", "Cascadia Mono", "Me
 # usually available there.
 CORE_UI_FONTS = ("bitstream charter", "charter", "helvetica")
 CORE_MONO_FONTS = ("fixed", "courier 10 pitch", "courier")
-XFT_HINT = ("Fonts look blocky? This Python's Tk was built without anti-aliased fonts (Xft). In a conda "
-            "environment, install the Xft build with:  conda install -c conda-forge \"tk=*=xft*\"")
+XFT_HINT = ("Fonts look blocky? This Python's Tk was built without anti-aliased fonts (Xft). Use the conda "
+            "environment from the README (environment.yml), or run:  conda install -c conda-forge \"tk=*=xft*\"")
 
 # ------------------------------------------------------------------- fields
 
@@ -819,6 +819,9 @@ class GephyraApp:
             script = files[0] if files else forms.visualize_output_path(kwargs)
             headline = "Script ready"
             body = "Open it with:\n" + USAGE[kwargs["format"]].format(script=os.path.basename(script))
+            if kwargs["format"] == "vmd":
+                body += ("\n\nThe -e is required: 'vmd " + os.path.basename(script) + "' without it makes VMD read "
+                         "the script as a molecule and nothing is drawn.")
             if kwargs.get("with_structure") and len(files) > 1 and files[-1].endswith("_structure.pdb"):
                 body += "\n\nThe script loads the protein, ligand and water network by itself."
             self._append_log("Open it with: " + USAGE[kwargs["format"]].format(script=script), logging.INFO, tag="command")

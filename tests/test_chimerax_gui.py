@@ -502,6 +502,17 @@ class TestGuiApp(_TmpDir):
         self.assertIn("chimerax pathways_viz.cxc", message)
         self.assertEqual(files, [self.p("pathways_viz.cxc")])
 
+    def test_vmd_confirmation_insists_on_dash_e(self):
+        v = self.app.vars["visualize"]
+        v["data"].set(self.p("r.jsonl"))
+        v["mode"].set("frame")
+        v["format"].set("vmd")
+        self.app.start("visualize")
+        self._wait()
+        message = self.successes[0][1]
+        self.assertIn("vmd -e pathways_viz.tcl", message)
+        self.assertIn("The -e is required", message)
+
     def test_runtime_exception_becomes_error_dialog(self):
         def boom(_cb):
             raise ValueError("Root selection matched nothing")

@@ -98,13 +98,38 @@ Gephyra (derived from the Ancient Greek word for "bridge") is a network-graph an
 
 ## Installation
 
-Requires Python 3.8 or higher.
+Gephyra requires **Python 3.11**. Install it in a dedicated conda environment,
+so that the Python version and the libraries it needs do not clash with other
+software on your machine (for example a PyMOL installation, which ships its own
+Python):
 
 ```bash
-# Standard install from repository root
+git clone https://github.com/insilichem/Gephyra.git
+cd Gephyra
+conda create -n gephyra -c conda-forge python=3.11 "tk=*=xft*"
+conda activate gephyra
 pip install .
+```
 
-# Development (editable) install, with test dependencies
+Or create the same environment, with the scientific libraries taken from
+conda-forge, from the file in the repository:
+
+```bash
+git clone https://github.com/insilichem/Gephyra.git
+cd Gephyra
+conda env create -f environment.yml
+conda activate gephyra
+pip install .
+```
+
+`"tk=*=xft*"` selects conda-forge's Tk build with anti-aliased fonts. The
+default build only has bitmap fonts, which makes the graphical interface look
+blocky. Check the installation with `gephyra --version`, and remember to run
+`conda activate gephyra` in every new terminal before using Gephyra.
+
+For development, install in editable mode with the test dependencies:
+
+```bash
 pip install -e ".[test]"
 ```
 
@@ -151,9 +176,10 @@ The full walkthrough, with screenshots, is the PDF manual
   Python. The theme choice is remembered in `~/.config/gephyra/gui.json`.
 
 On some Linux distributions tkinter is a separate system package (for example
-`sudo apt install python3-tk`). If the text looks blocky, your Python's Tk was
-built without anti-aliased fonts; conda environments often ship this variant
-(the interface says so in its log). Install the anti-aliased build with:
+`sudo apt install python3-tk`). If the text looks blocky, Gephyra is running in a
+Python whose Tk was built without anti-aliased fonts (the interface says so in
+its log). This does not happen in the environment from [Installation](#installation);
+in an existing conda environment, fix it with:
 
 ```bash
 conda install -c conda-forge "tk=*=xft*"
@@ -262,6 +288,11 @@ beforehand; run the script directly:
 | UCSF Chimera | `chimera scene.py`, or *File › Open…* |
 | PyMOL | `pymol scene.py`, or `run scene.py` inside PyMOL |
 | VMD | `vmd -e scene.tcl`, or `source scene.tcl` in the Tk Console. Note the `-e`: `vmd scene.tcl` makes VMD try to read the script as a molecule file. |
+
+> **VMD scripts must be run with `vmd -e script.tcl`.** Without `-e`, VMD treats
+> the `.tcl` file as a molecule, fails with *"Unable to determine file type …
+> Assuming pdb"*, and draws nothing. Inside a running VMD, use
+> `source script.tcl` in *Extensions › Tk Console* instead.
 
 Re-running a script replaces the previous Gephyra scene instead of piling up copies.
 

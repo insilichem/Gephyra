@@ -217,22 +217,39 @@ def story():
 
     s += [H1("2. Installation and start-up"),
           H2("Requirements"),
-          *bullets(["Python 3.8 or newer.",
-                    "MDAnalysis, NetworkX, NumPy and SciPy (installed automatically with Gephyra).",
-                    "tkinter, which is part of Python. On some Linux distributions it is a separate package, "
-                    "for example <font face='Courier'>sudo apt install python3-tk</font>.",
+          *bullets(["<b>Python 3.11</b>, in a dedicated conda environment (below). Using a separate environment "
+                    "keeps the Python version and libraries Gephyra needs from clashing with other software, such "
+                    "as a PyMOL installation that ships its own Python.",
+                    "Conda (Miniconda, Miniforge or Anaconda) to create that environment.",
+                    "MDAnalysis, NetworkX, NumPy and SciPy, installed together with Gephyra.",
                     "At least one molecular viewer to look at the results: UCSF ChimeraX, UCSF Chimera, PyMOL or VMD."]),
           H2("Installing Gephyra"),
-          P("From a copy of the repository:"),
-          code("git clone https://github.com/insilichem/Gephyra.git\ncd Gephyra\npip install ."),
+          P("In a terminal, download Gephyra, create its environment and install it:"),
+          code('git clone https://github.com/insilichem/Gephyra.git\n'
+               'cd Gephyra\n'
+               'conda create -n gephyra -c conda-forge python=3.11 "tk=*=xft*"\n'
+               'conda activate gephyra\n'
+               'pip install .'),
+          P("The same environment, with the scientific libraries also taken from conda-forge, can be created from "
+            "the file shipped with Gephyra:"),
+          code('git clone https://github.com/insilichem/Gephyra.git\n'
+               'cd Gephyra\n'
+               'conda env create -f environment.yml\n'
+               'conda activate gephyra\n'
+               'pip install .'),
+          P("<font face='Courier'>\"tk=*=xft*\"</font> selects the build of the Tk graphics library with smooth, "
+            "anti-aliased fonts; with the default build the interface text looks blocky. Check the installation "
+            "with <font face='Courier'>gephyra --version</font>."),
+          tip("Run <font face='Courier'>conda activate gephyra</font> in every new terminal before using Gephyra. "
+              "If the <font face='Courier'>gephyra</font> command is not found, the environment is not active."),
           H2("Starting the interface"),
-          code("gephyra gui\n# or\ngephyra-gui"),
+          code("conda activate gephyra\ngephyra gui\n# or\ngephyra-gui"),
           P("The window opens on step 1. The folder you start it from is the default output folder (you can "
             "change it at any time, see section 3)."),
-          tip("If the text looks blocky or pixelated, your Python's Tk library was built without anti-aliased fonts. "
-              "Conda environments often ship this variant, and the interface says so in its log. Install the "
-              "anti-aliased build with <font face='Courier'>conda install -c conda-forge \"tk=*=xft*\"</font> and "
-              "restart the interface."),
+          tip("If the text looks blocky or pixelated, Gephyra is running in a Python whose Tk library has no "
+              "anti-aliased fonts, and the interface says so in its log. This does not happen in the environment "
+              "above; in another conda environment, install the right build with "
+              "<font face='Courier'>conda install -c conda-forge \"tk=*=xft*\"</font> and restart the interface."),
           ]
 
     s += [PageBreak(), H1("3. The window at a glance"),
@@ -343,6 +360,10 @@ def story():
                   "scene.tcl</font> in the Tk Console. The <font face='Courier'>-e</font> matters: without it VMD tries "
                   "to read the script as a molecule."]],
                 [3.0 * cm, 1.6 * cm, 11.9 * cm]),
+          P("<b>VMD scripts must be run with <font face='Courier'>vmd -e scene.tcl</font>.</b> Without "
+            "<font face='Courier'>-e</font>, VMD treats the script as a molecule file, reports <i>Unable to determine "
+            "file type</i>, and draws nothing. Inside a running VMD, use <font face='Courier'>source scene.tcl</font> "
+            "in Extensions > Tk Console instead.", "tip"),
           P("Running a script again replaces the previous Gephyra scene."),
           screenshot("08_scene_frame.png"),
           screenshot("09_scene_clusters.png"),
