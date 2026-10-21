@@ -13,8 +13,8 @@ def load_clusters(path):
     """
     (clusters, metadata) from a cluster file.
 
-    Gephyra >= 0.4 writes {"type": "gephyra_clusters", "metadata": ..., "clusters": [...]};
-    older versions wrote the bare list, for which metadata is {}.
+    Current files are {"type": "gephyra_clusters", "metadata": ..., "clusters": [...]};
+    older ones are a bare list, for which metadata is {}.
     """
     with open(path) as f:
         obj = json.load(f)

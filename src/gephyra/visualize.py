@@ -661,7 +661,7 @@ def resolve_structure(data_file, topo_file=None, traj_file=None, context_sel=Non
     root = root_sel or info.get("root_sel")
     water = water_sel or info.get("water_sel")
     if not topo:
-        logger.warning("The data file does not record the analysed topology (it predates Gephyra 0.4). "
+        logger.warning("The data file does not record the analysed topology (it was written by an older version of Gephyra). "
                        "Writing geometry only; pass --topo and --traj to include the protein and waters.")
         return None
     if not root or not water:

@@ -39,9 +39,12 @@ LINE = colors.HexColor("#d6dde5")
 # file name -> what the screenshot should show (also the placeholder text)
 SCREENSHOTS = {
     "01_overview.png": "The main window: sidebar with the three steps and the output folder, the form, the progress bar and the log.",
+    "01b_output_folder.png": "Choosing the output folder with Change... in the sidebar.",
     "02_analysis.png": "Step 1, Pathway Analysis, filled in with a topology, a trajectory and a root selection.",
+    "02b_analysis_running.png": "While the analysis runs: the progress bar counts frames and the log streams messages.",
     "03_analysis_done.png": "The confirmation shown when the analysis finishes, listing the saved files and their folder.",
     "04_clustering.png": "Step 2, Clustering, with the pathway data filled in from step 1.",
+    "04b_clustering_running.png": "While clustering runs: progress through the Frechet distance matrix.",
     "05_clustering_done.png": "The confirmation shown when clustering finishes.",
     "06_visualization.png": "Step 3, Visualization: viewer, mode and the molecular-scene section.",
     "07_script_ready.png": "The 'Script ready' confirmation with the command that opens the script.",
@@ -272,6 +275,7 @@ def story():
           P("Output fields such as <i>Results file</i> or <i>Script name</i> hold file <b>names</b>, which are saved "
             "inside the output folder shown in the sidebar. Type an absolute path in a field to save that file "
             "somewhere else. If the output folder does not exist, the interface offers to create it."),
+          screenshot("01b_output_folder.png", width=12 * cm),
           P("After a step finishes, its confirmation window lists every saved file with its folder, and offers "
             "<b>Open folder</b> and <b>Save a copy to...</b>, so results can also be stored in another location "
             "after the calculation."),
@@ -298,6 +302,7 @@ def story():
                 [3.4 * cm, 10.1 * cm, 3.0 * cm]),
           tip("For a first look at a long trajectory, start with a stride of 10-50. The analysis time grows with the "
               "number of frames and with Max depth."),
+          screenshot("02b_analysis_running.png", width=14 * cm),
           P("Click <b>Run analysis</b>. The progress bar counts the frames; when it finishes, a confirmation reports "
             "how many water-bridge paths were found and where the files were saved. Click <b>Next: Clustering</b> "
             "to continue: the results file is already filled in on the next step."),
@@ -317,6 +322,7 @@ def story():
                  ["Max paths", "Memory cap: beyond this, only the most frequent paths are clustered.", "60000"],
                  ["Cluster file", "Name of the cluster file in the output folder.", "clustered_pathways.json"]],
                 [3.4 * cm, 10.1 * cm, 3.0 * cm]),
+          screenshot("04b_clustering_running.png", width=14 * cm),
           P("Click <b>Run clustering</b>. When it finishes, a confirmation window reports how many channels were "
             "identified and lists the saved file. <b>Next: Visualization</b> opens step 3 with the cluster file "
             "already selected."),
@@ -343,7 +349,7 @@ def story():
             "trajectory and writes a small structure file (<font face='Courier'>&lt;name&gt;_structure.pdb</font>) next to "
             "the script, which the script loads by itself. The topology and trajectory are read from the data file; "
             "the line under the section says which ones. Fill in <b>Topology</b> and <b>Trajectory</b> only for "
-            "result files made with Gephyra versions older than 0.4, or if the files have moved."),
+            "older result files that do not record them, or if the files have moved."),
           P("Untick it to write only the network geometry, then open the analysed structure in the viewer yourself "
             "before running the script."),
           H2("Writing and opening the script"),
@@ -396,7 +402,7 @@ def story():
                   "trajectory."],
                  ["Mode 'cluster' needs the cluster file", "In step 3, cluster mode reads the file from step 2; frame and "
                   "density modes read the results file from step 1."],
-                 ["The data file does not record its structure", "The file comes from Gephyra < 0.4. Fill in "
+                 ["The data file does not record its structure", "The file comes from an older version of Gephyra. Fill in "
                   "Topology and Trajectory in the Molecular scene section."],
                  ["VMD: Unable to determine file type", "Open the script with <font face='Courier'>vmd -e scene.tcl</font>."],
                  ["Too many clusters to read the picture", "Lower <b>Top clusters</b>, or draw a single cluster with "

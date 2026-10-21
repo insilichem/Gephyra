@@ -114,7 +114,7 @@ def build_parser():
              "Geometry-only scripts address the structure you opened yourself (default #1).")
     vis_parser.add_argument("--topo", default=None,
         help="Topology of the analysed system. Defaults to the one recorded in the data file "
-             "(Gephyra >= 0.4); needed for older files to include the protein and waters.")
+             "(current versions); needed for older result files to include the protein and waters.")
     vis_parser.add_argument("--traj", default=None, help="Trajectory of the analysed system (see --topo).")
     vis_parser.add_argument("--context", default=None,
         help="MDAnalysis selection of the solute shown around the network. "

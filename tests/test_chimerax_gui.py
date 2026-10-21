@@ -561,6 +561,11 @@ class TestGuiApp(_TmpDir):
         self.assertEqual(str(w["topo"].cget("state")), "disabled")
         self.assertIn("Geometry only", self.app.structure_hint.cget("text"))
 
+    def test_window_uses_the_gephyra_icon(self):
+        from gephyra.gui import ICON_SIZES
+        self.assertEqual(sorted(i.width() for i in self.app._icons), list(ICON_SIZES))
+        self.assertTrue(all(i.width() == i.height() for i in self.app._icons))
+
     def test_theme_toggle_switches_palette(self):
         self.assertEqual(self.app.theme_name, "dark")
         self.app.toggle_theme()

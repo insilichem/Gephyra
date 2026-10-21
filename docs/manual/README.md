@@ -16,9 +16,12 @@ placeholder frames, and the build lists them.
 | File | What it should show |
 |---|---|
 | `01_overview.png` | The main window: sidebar with the three steps and the output folder, form, progress bar and log |
+| `01b_output_folder.png` | Choosing the output folder with *Change…* |
 | `02_analysis.png` | Step 1 filled in with a topology, a trajectory and a root selection |
+| `02b_analysis_running.png` | Progress bar and log while the analysis runs |
 | `03_analysis_done.png` | The confirmation after the analysis, listing the saved files |
 | `04_clustering.png` | Step 2 with the pathway data filled in |
+| `04b_clustering_running.png` | Progress while clustering runs |
 | `05_clustering_done.png` | The confirmation after clustering |
 | `06_visualization.png` | Step 3: viewer, mode and the molecular-scene section |
 | `07_script_ready.png` | The "Script ready" confirmation |
