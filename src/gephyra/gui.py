@@ -38,6 +38,7 @@ except ImportError:  # pragma: no cover - depends on the Python build
 
 logger = logging.getLogger(__name__)
 
+ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".config", "gephyra", "gui.json")
 
 # ----------------------------------------------------------------- palettes
@@ -128,7 +129,7 @@ SECTIONS = {
         ]),
         ("Molecular scene", [
             ("with_structure", "Include protein, ligand and waters", "check", None, "The script loads a structure snapshot written by Gephyra, so the network is shown in its molecular context."),
-            ("topo", "Topology", "open", TOPOLOGY_TYPES, "Only needed when the data file does not record it (files from Gephyra < 0.4)."),
+            ("topo", "Topology", "open", TOPOLOGY_TYPES, "Only needed when the data file does not record it (older result files)."),
             ("traj", "Trajectory", "open", TRAJECTORY_TYPES, "Only needed when the data file does not record it."),
             ("context", "Context selection", "text", None, "Optional MDAnalysis selection for the solute shown. Default: everything but solvent and counter-ions."),
         ]),
@@ -281,6 +282,7 @@ class GephyraApp:
             pkg_logger.setLevel(logging.INFO)  # keep a more verbose level (gephyra -v gui) if set
 
         master.title(f"Gephyra {__version__}")
+        self._set_window_icon()
         master.geometry("1120x780")
         master.minsize(980, 680)
         master.protocol("WM_DELETE_WINDOW", self.close)
@@ -294,6 +296,21 @@ class GephyraApp:
             self._append_log(XFT_HINT, logging.WARNING)
         master.bind("<Control-Return>", lambda _e: self.start(self.active_stage))
         self._poll_id = master.after(self.POLL_MS, self._poll)
+
+    def _set_window_icon(self):
+        """Taskbar/dock and title-bar icon (instead of the toolkit's generic one)."""
+        self._icons = []
+        folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+        for size in ICON_SIZES:
+            path = os.path.join(folder, f"gephyra-{size}.png")
+            if os.path.exists(path):
+                try:
+                    self._icons.append(tk.PhotoImage(master=self.master, file=path))
+                except tk.TclError:  # Tk without PNG support (< 8.6)
+                    pass
+        if self._icons:
+            # Largest first: some window managers only use the first image.
+            self.master.iconphoto(True, *reversed(self._icons))
 
     # ------------------------------------------------------------- theming
     def _init_fonts(self):

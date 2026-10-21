@@ -49,7 +49,6 @@ SCREENSHOTS = {
     "06_visualization.png": "Step 3, Visualization: viewer, mode and the molecular-scene section.",
     "07_script_ready.png": "The 'Script ready' confirmation with the command that opens the script.",
     "08_scene_frame.png": "A frame scene in ChimeraX: protein cartoon, ligand, water molecules and dashed water bridges.",
-    "08b_scene_closeup.png": "Close-up of the frame scene: water molecules bridging from the ligand's root oxygen.",
     "09_scene_clusters.png": "A cluster scene: colour-coded medoid paths around the protein, with the legend.",
     "10_light_theme.png": "The same window in the light theme.",
 }
@@ -350,7 +349,7 @@ def story():
             "trajectory and writes a small structure file (<font face='Courier'>&lt;name&gt;_structure.pdb</font>) next to "
             "the script, which the script loads by itself. The topology and trajectory are read from the data file; "
             "the line under the section says which ones. Fill in <b>Topology</b> and <b>Trajectory</b> only for "
-            "result files made with Gephyra versions older than 0.4, or if the files have moved."),
+            "older result files that do not record them, or if the files have moved."),
           P("Untick it to write only the network geometry, then open the analysed structure in the viewer yourself "
             "before running the script."),
           H2("Writing and opening the script"),
@@ -373,7 +372,6 @@ def story():
             "in Extensions > Tk Console instead.", "tip"),
           P("Running a script again replaces the previous Gephyra scene."),
           screenshot("08_scene_frame.png"),
-          screenshot("08b_scene_closeup.png", width=13 * cm),
           screenshot("09_scene_clusters.png"),
           ]
 
@@ -404,7 +402,7 @@ def story():
                   "trajectory."],
                  ["Mode 'cluster' needs the cluster file", "In step 3, cluster mode reads the file from step 2; frame and "
                   "density modes read the results file from step 1."],
-                 ["The data file does not record its structure", "The file comes from Gephyra < 0.4. Fill in "
+                 ["The data file does not record its structure", "The file comes from an older version of Gephyra. Fill in "
                   "Topology and Trajectory in the Molecular scene section."],
                  ["VMD: Unable to determine file type", "Open the script with <font face='Courier'>vmd -e scene.tcl</font>."],
                  ["Too many clusters to read the picture", "Lower <b>Top clusters</b>, or draw a single cluster with "

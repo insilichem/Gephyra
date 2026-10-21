@@ -33,7 +33,7 @@ def _write_clusters(output_file, clusters, source_metadata, cluster_params):
     `metadata` carries the analysed system (topology, trajectory, selections)
     from the .jsonl, so `visualize` can rebuild the molecular scene from the
     cluster file alone. Readers should use `results.load_clusters`, which also accepts
-    the plain list written by Gephyra < 0.4.
+    the plain list written by older versions.
     """
     metadata = {k: v for k, v in source_metadata.items() if k != "type"}
     metadata["clustering"] = cluster_params

@@ -26,7 +26,6 @@ placeholder frames, and the build lists them.
 | `06_visualization.png` | Step 3: viewer, mode and the molecular-scene section |
 | `07_script_ready.png` | The "Script ready" confirmation |
 | `08_scene_frame.png` | A frame scene in a viewer: protein, ligand, water molecules and dashed bridges |
-| `08b_scene_closeup.png` | Close-up of the frame scene around the root atom |
 | `09_scene_clusters.png` | A cluster scene: colour-coded medoids around the protein, with the legend |
 | `10_light_theme.png` | The window in the light theme |
 

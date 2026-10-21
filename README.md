@@ -242,7 +242,7 @@ gephyra cluster \
 | `--max_paths` | `60000` | Hard cap on number of paths sent to the distance matrix. |
 | `--output` | `clustered_pathways.json` | Output JSON file for the cluster summary. |
 
-Since 0.4 the cluster file is `{"type": "gephyra_clusters", "metadata": …, "clusters": […]}`.
+The cluster file is `{"type": "gephyra_clusters", "metadata": …, "clusters": […]}`.
 `metadata` records the analysed system (topology, trajectory, selections) and
 the clustering parameters, and each cluster gains `medoid_nodes`, the atom
 indices of its medoid path at `medoid_frame`. Read it with
@@ -328,9 +328,9 @@ How the snapshot is built:
 | `--frame` | — | Trajectory frame index for `--mode frame`. If omitted, or not in the data (e.g. skipped by `--stride`), the first stored frame is used and a warning is logged. |
 | `--cluster_id` | — | Draw only this cluster (its sequential rank), rebuilt as molecules. |
 | `--top_clusters` | all | Draw only the N most occupied clusters. |
-| `--topo`, `--traj` | from the data file | The analysed system. Only needed for files from Gephyra < 0.4, or if the files have moved. |
+| `--topo`, `--traj` | from the data file | The analysed system. Only needed for older result files that do not record them, or if the files have moved. |
 | `--context` | solute | MDAnalysis selection for the molecules shown around the network. |
-| `--no_structure` | off | Write geometry only and load a matching structure in the viewer yourself (the pre-0.4 behaviour). |
+| `--no_structure` | off | Write geometry only and load a matching structure in the viewer yourself (the behaviour of older versions). |
 | `--max_bond_draw_dist` | `6.0` | Segments longer than this (Å) are treated as periodic-boundary artifacts and skipped. |
 | `--chimerax_model` | `#101` / `#1` | ChimeraX model id. Scene scripts open the structure at `#101` (geometry at `#102`, bridges at `#103`). Geometry-only scripts address the structure you opened yourself, by default `#1`. |
 | `--output` | `pathways_viz` | Output script name; the viewer's extension is added if missing. The output folder must exist. |
@@ -402,8 +402,8 @@ node rather than as an endpoint: paths may continue *through* it.
 
 **Solute imaging across periodic boundaries.** Path coordinates are stored
 with each water in the periodic image nearest to its predecessor on the chain,
-starting from the root, so paths are never torn across the box (files written
-before 0.4 stored raw wrapped positions). The solute itself is not re-imaged:
+starting from the root, so paths are never torn across the box (older result
+files stored raw wrapped positions). The solute itself is not re-imaged:
 if the protein is split across the box in the trajectory, it is drawn that way.
 Image or centre the trajectory before analysis.
 
