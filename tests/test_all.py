@@ -134,7 +134,7 @@ class TestVisualization(unittest.TestCase):
             pass
         try:
             run_visualization(temp_file.name, format="vmd", mode="frame", frame_idx=0, output_file="test_out")
-            mock_export.assert_called_once_with(temp_file.name, output_file="test_out.tcl", mode="frame", frame_idx=0, cluster_id=None, max_bond_draw_dist=6.0)
+            mock_export.assert_called_once_with(temp_file.name, output_file="test_out.tcl", mode="frame", frame_idx=0, cluster_id=None, max_bond_draw_dist=6.0, structure=None, top_clusters=None)
         finally:
             os.remove(temp_file.name)
 
@@ -144,7 +144,7 @@ class TestVisualization(unittest.TestCase):
             pass
         try:
             run_visualization(temp_file.name, format="pymol", mode="density", output_file="test_out")
-            mock_export.assert_called_once_with(temp_file.name, output_file="test_out.py", mode="density", frame_idx=None, cluster_id=None, max_bond_draw_dist=6.0)
+            mock_export.assert_called_once_with(temp_file.name, output_file="test_out.py", mode="density", frame_idx=None, cluster_id=None, max_bond_draw_dist=6.0, structure=None, top_clusters=None)
         finally:
             os.remove(temp_file.name)
 
@@ -154,7 +154,7 @@ class TestVisualization(unittest.TestCase):
             pass
         try:
             run_visualization(temp_file.name, format="chimera", mode="frame", frame_idx=10, output_file="test_out.py")
-            mock_export.assert_called_once_with(temp_file.name, output_file="test_out.py", mode="frame", frame_idx=10, cluster_id=None, max_bond_draw_dist=6.0)
+            mock_export.assert_called_once_with(temp_file.name, output_file="test_out.py", mode="frame", frame_idx=10, cluster_id=None, max_bond_draw_dist=6.0, structure=None, top_clusters=None)
         finally:
             os.remove(temp_file.name)
 
@@ -270,8 +270,9 @@ class TestFixtureClustering(unittest.TestCase):
 
         cluster_pathways(data_file=self.FIXTURE, threshold=6.0, output_file=out_name)
 
-        with open(out_name) as f:
-            clusters = json.load(f)
+        from gephyra.results import load_clusters
+        clusters, metadata = load_clusters(out_name)
+        self.assertEqual(metadata["parameters"]["root_sel"], "resname LIG and name O1")
 
         # Four spatial channels, minus the single-frame one discarded after merging.
         self.assertEqual(len(clusters), 3)

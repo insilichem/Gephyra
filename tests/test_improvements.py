@@ -11,6 +11,7 @@ import numpy as np
 
 from gephyra import __version__
 from gephyra.analysis import cluster_pathways, run_analysis, validate_calculation_parameters
+from gephyra.results import load_clusters
 from gephyra.cli import main
 from gephyra.math_utils import condensed_submatrix, normalize_hquality, pairwise_discrete_frechet
 from gephyra.visualize import _bild_path, _resolve_frame, detect_data_kind, run_visualization
@@ -78,14 +79,12 @@ class TestClusterSinglePath(unittest.TestCase):
     def test_single_path_in_one_frame_is_discarded_like_any_other_cluster(self):
         _write_jsonl(self.data, 5, [(0, [self.PATH]), (1, [])])
         cluster_pathways(self.data, output_file=self.out)
-        with open(self.out) as f:
-            self.assertEqual(json.load(f), [])
+        self.assertEqual(load_clusters(self.out)[0], [])
 
     def test_single_path_in_several_frames_is_kept(self):
         _write_jsonl(self.data, 4, [(0, [self.PATH]), (1, [self.PATH]), (3, [self.PATH])])
         cluster_pathways(self.data, output_file=self.out)
-        with open(self.out) as f:
-            clusters = json.load(f)
+        clusters = load_clusters(self.out)[0]
         self.assertEqual(len(clusters), 1)
         self.assertAlmostEqual(clusters[0]["occupancy"], 0.75)
         self.assertEqual(clusters[0]["max_persistence_frames"], 2)
@@ -98,8 +97,7 @@ class TestClusterSinglePath(unittest.TestCase):
         legacy["probability"] = 2.0
         _write_jsonl(self.data, 2, [(0, [legacy]), (1, [legacy])])
         cluster_pathways(self.data, output_file=self.out)
-        with open(self.out) as f:
-            clusters = json.load(f)
+        clusters = load_clusters(self.out)[0]
         self.assertAlmostEqual(clusters[0]["avg_hquality"], 2.0)
         self.assertAlmostEqual(clusters[0]["avg_hquality_norm"], 2.0 / 3.0)
 
@@ -151,7 +149,7 @@ class TestRunAnalysisEndToEnd(unittest.TestCase):
 
     def _run(self, **kwargs):
         with self.assertLogs("gephyra.analysis", level="INFO") as logs:
-            run_analysis(self.pdb, None, "resname LIG", water_sel="resname SOL",
+            run_analysis(self.pdb, self.pdb, "resname LIG", water_sel="resname SOL",
                          output_file=self.out, **kwargs)
         return "\n".join(logs.output)
 
@@ -189,7 +187,22 @@ class TestRunAnalysisEndToEnd(unittest.TestCase):
 
     def test_empty_root_selection_raises(self):
         with self.assertRaises(ValueError):
-            run_analysis(self.pdb, None, "resname NOPE", water_sel="resname SOL", output_file=self.out)
+            run_analysis(self.pdb, self.pdb, "resname NOPE", water_sel="resname SOL", output_file=self.out)
+
+    def test_trajectory_is_required(self):
+        for traj in (None, ""):
+            with self.subTest(traj=traj), self.assertRaises(ValueError) as cm:
+                run_analysis(self.pdb, traj, "resname LIG", output_file=self.out)
+            self.assertIn("trajectory file is required", str(cm.exception))
+        with self.assertRaises(FileNotFoundError):
+            run_analysis(self.pdb, "missing.dcd", "resname LIG", output_file=self.out)
+
+    def test_metadata_records_the_analysed_system(self):
+        self._run(min_depth=1, max_depth=2)
+        with open(self.out) as f:
+            meta = json.loads(f.readline())
+        self.assertEqual(meta["topo_file"], os.path.abspath(self.pdb))
+        self.assertEqual(meta["traj_file"], os.path.abspath(self.pdb))
 
     def test_invalid_parameters_raise_before_loading(self):
         with self.assertRaises(ValueError):

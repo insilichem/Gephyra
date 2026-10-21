@@ -1,0 +1,21 @@
+# Conda environment for Gephyra.
+#
+#   conda env create -f environment.yml
+#   conda activate gephyra
+#   pip install .
+#
+# Gephyra requires Python 3.10 or newer; 3.11 is the recommended version and
+# the one pinned here. Tk is pinned to conda-forge's "xft" build: the default
+# "noxft" build only has bitmap fonts, which makes the graphical interface
+# (gephyra gui) look blocky.
+name: gephyra
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - "tk=*=xft*"
+  - pip
+  - "mdanalysis>=2.1"
+  - networkx
+  - numpy
+  - scipy
