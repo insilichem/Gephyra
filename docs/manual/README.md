@@ -33,9 +33,12 @@ PNG at the window's native size works best; images are scaled to the page width.
 
 ## Scene figures
 
-`08_scene_frame.png` and `09_scene_clusters.png` show a purely hypothetical system (an idealised
-four-helix bundle, a made-up ligand `LIG` and a water box). They are regenerated, end to end through the
-real Gephyra pipeline, with:
+`08_scene_frame.png` and `09_scene_clusters.png` are ChimeraX renders of an example system, supplied
+like the other screenshots. Keep viewer labels (residue names, distances) out of them.
+
+To render the same two scenes from a purely hypothetical system instead (an idealised four-helix bundle, a
+made-up ligand `LIG` and a water box, run end to end through the real Gephyra pipeline), run the script
+below. It overwrites both images.
 
 ```bash
 python docs/manual/example/make_scene_figures.py   # needs PyMOL's Python module, MDAnalysis and chimerax
