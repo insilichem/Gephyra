@@ -321,6 +321,12 @@ How the snapshot is built:
   "missing segment". The root residue and the bridging waters get chains of
   their own (`Y` and `W` unless those are taken), which is how the scripts
   address them.
+- **Cofactors and metal centres.** Every solute residue that is not a standard
+  amino acid or nucleotide (cofactors, metal complexes, renamed metal-binding
+  residues) is drawn as sticks, and single-atom metals as spheres, even when
+  the topology bonds them to the protein (as metal-centre parameterisations
+  do) and they therefore share its chain. They are written as `HETATM`
+  records and included in the camera framing.
 
 | Option | Default | Description |
 |---|---|---|

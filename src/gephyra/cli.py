@@ -155,7 +155,7 @@ def main(argv=None):
     if args.command == "calculate" and args.min_depth > args.max_depth:
         parser.error(f"--min_depth ({args.min_depth}) cannot exceed --max_depth ({args.max_depth}).")
     if args.command == "visualize" and args.mode == "frame" and args.frame is None:
-        logger.warning("--mode frame given without --frame; the first frame in the data will be drawn.")
+        logger.warning("--mode frame given without --frame; the first frame with water bridges will be drawn.")
 
     if args.command == "gui":
         from .gui import main as gui_main
