@@ -68,7 +68,7 @@ def detect_data_kind(path):
 def structure_info(path):
     """
     What is known about the analysed system from a result file:
-    {'topo_file', 'traj_file', 'root_sel', 'water_sel'} (values may be None).
+    {'topo_file', 'traj_file', 'root_sel', 'water_sel', 'alignment'} (values may be None).
     """
     kind = detect_data_kind(path)
     meta = {}
@@ -82,4 +82,5 @@ def structure_info(path):
         "traj_file": meta.get("traj_file") if meta else None,
         "root_sel": params.get("root_sel"),
         "water_sel": params.get("water_sel"),
+        "alignment": meta.get("alignment") if meta else None,
     }

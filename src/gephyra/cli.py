@@ -64,6 +64,13 @@ def build_parser():
     calc_parser.add_argument("--max_depth", type=_positive_int, default=10, help="Maximum number of consecutive waters in a path.")
     calc_parser.add_argument("--min_depth", type=_positive_int, default=1, help="Minimum number of consecutive waters in a path to save in results.")
     calc_parser.add_argument("--cooperativity", type=_cooperativity, default=0.92, help="Depth-dependent cooperativity factor for hydrogen bonds, in (0, 1]. 1.0 disables the effect.")
+    calc_parser.add_argument("--align", default="auto",
+        help="MDAnalysis selection used to superpose every frame onto the first analysed one before "
+             "path coordinates are stored, so that clustering compares channels in a common frame "
+             "even if the solute drifts or rotates. Default 'auto': protein C-alpha atoms "
+             "(or nucleic-acid P).")
+    calc_parser.add_argument("--no_align", action="store_true",
+        help="Store path coordinates exactly as in the trajectory (only for trajectories already fitted).")
     calc_parser.add_argument("--coarse_cutoff", type=_positive_float, default=4.5, help="Coarse distance cutoff (Angstroms) for initial graph building.")
     calc_parser.add_argument("--output", default="results.jsonl", help="Output JSON Lines file for storing the raw network data.")
     calc_parser.add_argument("--csv", default=None, help="Optional output CSV file for storing human-readable summary data.")
@@ -173,6 +180,7 @@ def _dispatch(args):
             min_depth=args.min_depth,
             cooperativity=args.cooperativity,
             coarse_cutoff=args.coarse_cutoff,
+            align_sel=None if args.no_align else args.align,
             output_file=args.output,
             csv_file=args.csv,
             cluster=args.cluster,

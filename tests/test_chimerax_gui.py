@@ -235,6 +235,18 @@ class TestForms(_TmpDir):
         err = self.assertFieldError("calculate", self.calc(), "outdir", outdir=self.p("not", "there"))
         self.assertEqual(err.code, "missing_dir")
 
+    def test_alignment_option(self):
+        parser = build_parser()
+        self.assertEqual(forms.parse_calculate(self.calc(), self.tmp)["align_sel"], "auto")
+        for off in ("", "none", "OFF"):
+            kw = forms.parse_calculate(self.calc(align=off), self.tmp)
+            self.assertIsNone(kw["align_sel"])
+            args = parser.parse_args(shlex.split(forms.build_command_line("calculate", kw))[1:])
+            self.assertTrue(args.no_align)
+        kw = forms.parse_calculate(self.calc(align="protein and backbone"), self.tmp)
+        args = parser.parse_args(shlex.split(forms.build_command_line("calculate", kw))[1:])
+        self.assertEqual((args.align, args.no_align), ("protein and backbone", False))
+
     def test_trajectory_is_required(self):
         self.assertFieldError("calculate", self.calc(traj=""), "traj")
         self.assertFieldError("calculate", self.calc(traj=self.p("missing.xtc")), "traj")

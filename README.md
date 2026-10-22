@@ -219,6 +219,8 @@ gephyra calculate \
 | `--min_depth` | `1` | Minimum number of sequential water molecules in a path; shorter paths are discarded from output. |
 | `--cooperativity` | `0.92` | Geometric discount applied to successive hydrogen bonds along a chain: the *k*-th bond contributes its weight scaled by `cooperativity^(k-1)`. This models the polarisation that propagates along a water wire, which makes a bond embedded in a chain stronger than the same geometry in isolation. Values below 1.0 favour longer chains; `1.0` disables the effect and recovers the plain product of edge probabilities. |
 | `--coarse_cutoff` | `4.5` | Distance cutoff in Å for initial neighbour graph construction. |
+| `--align` | `auto` | Atoms used to superpose every frame onto the first analysed frame before path coordinates are stored (`auto`: protein Cα, or nucleic-acid P). This puts the same channel at the same coordinates in every frame even when the solute drifts or rotates through the box, which clustering needs. The choice is recorded in the output and reused by `visualize`. |
+| `--no_align` | off | Store path coordinates exactly as in the trajectory. Only for trajectories that are already fitted. |
 | `--output` | `results.jsonl` | Output file for full frame-by-frame path data (JSON Lines format). |
 | `--csv` | — | Optional human-readable CSV summary of detected paths (columns `Frame`, `Root_Residue`, `Path_Atom_Indices`, `Path_Length`, `HQuality_Z`, `HQuality_Norm`, `Average_OO_Distance`). |
 
@@ -403,9 +405,12 @@ node rather than as an endpoint: paths may continue *through* it.
 **Solute imaging across periodic boundaries.** Path coordinates are stored
 with each water in the periodic image nearest to its predecessor on the chain,
 starting from the root, so paths are never torn across the box (older result
-files stored raw wrapped positions). The solute itself is not re-imaged:
-if the protein is split across the box in the trajectory, it is drawn that way.
-Image or centre the trajectory before analysis.
+files stored raw wrapped positions). Frames are then superposed on the protein
+(`--align`), so a solute that drifts or tumbles through the box is handled. The
+solute itself is not re-imaged, though: if the protein is split across the box
+in some frames, the superposition is poor there (Gephyra warns when its RMSD is
+large) and the protein is drawn split. Image the trajectory before analysis
+(`cpptraj autoimage`, `gmx trjconv -pbc mol`).
 
 **Water molecule exchange along a pathway.** Occupancy is tracked by
 exact atom-index tuples. If the same physical channel is traversed by

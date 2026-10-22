@@ -88,6 +88,27 @@ cluster_scene*.py
 network_density*.py
 frame_*.py
 
+# Molecular-dynamics inputs (topologies, coordinates, trajectories) never belong
+# in the repository: they are large and may describe unpublished systems.
+*.pdb
+*.dcd
+*.xtc
+*.trr
+*.nc
+*.ncdf
+*.netcdf
+*.prmtop
+*.parm7
+*.inpcrd
+*.rst7
+*.crd
+*.mdcrd
+*.psf
+*.gro
+*.tpr
+# A CSV summary written without an extension (e.g. "results-run2").
+results-*
+
 # Test fixtures are tracked, despite the output-artifact patterns above.
 !tests/data/
 !tests/data/**
