@@ -126,7 +126,7 @@ SECTIONS = {
             ("data", "Input data", "open", VIS_INPUT_TYPES, "Step-1 .jsonl for density/frame modes; step-2 cluster file for cluster mode."),
             ("format", "Viewer", "choice", forms.VISUALIZE_FORMATS, "chimerax writes a .cxc script; chimera/pymol a .py; vmd a .tcl (run with vmd -e)."),
             ("mode", "Mode", "choice", forms.VISUALIZE_MODES, "cluster: cluster medoids. frame: one frame with its real water molecules. density: every path of every frame."),
-            ("frame", "Frame", "text", None, "Trajectory frame index (frame mode). Empty = first stored frame."),
+            ("frame", "Frame", "text", None, "Trajectory frame index (frame mode). Empty = the first frame with water bridges."),
             ("cluster_id", "Cluster ID", "text", None, "Cluster mode: draw a single cluster as real molecules at its medoid frame. Empty = several clusters."),
             ("top_clusters", "Top clusters", "text", None, "Cluster mode: number of most-occupied clusters to draw (empty = all)."),
         ]),
@@ -259,6 +259,7 @@ class GephyraApp:
         self.worker = None
         self.current_stage = None
         self.error_records = []
+        self.warning_records = []
         self.last_dir = os.getcwd()
         self.settings_enabled = settings_enabled
         self.settings = load_settings() if settings_enabled else {}
@@ -733,6 +734,7 @@ class GephyraApp:
 
         self.current_stage = stage
         self.error_records = []
+        self.warning_records = []
         self.cancel_event.clear()
         self._set_running(True)
         self.progress.configure(mode="indeterminate" if stage == "visualize" else "determinate", value=0)
@@ -779,8 +781,11 @@ class GephyraApp:
         kind = item[0]
         if kind == "log":
             _, text, level, message = item
-            if level >= logging.ERROR and self.current_stage is not None:
-                self.error_records.append(message)
+            if self.current_stage is not None:
+                if level >= logging.ERROR:
+                    self.error_records.append(message)
+                elif level >= logging.WARNING:
+                    self.warning_records.append(message)
             if level >= logging.INFO:
                 self._append_log(text, level)
         elif kind == "progress":
@@ -803,15 +808,32 @@ class GephyraApp:
             return
         if outcome == "error" or self.error_records or (stage == "visualize" and not result):
             self.progress.configure(value=0)
-            detail = message or "\n".join(self.error_records) or "No script was written; see the log for details."
+            # Say why: the exception, else the errors, else the warnings that
+            # explain an empty result (e.g. no water bridges in that frame).
+            detail = (message or "\n\n".join(self.error_records) or "\n\n".join(self.warning_records)
+                      or "No script was written; see the log for details.")
             self.status_var.set(f"{STEP_TITLES[stage]} failed.")
             self.show_error(f"{STEP_TITLES[stage]} failed", detail)
             return
 
         self.progress.configure(mode="determinate", value=1.0)
-        self._on_success(stage, kwargs, result)
+        warning = result.get("warning") if isinstance(result, dict) else None
+        if stage == "calculate" and isinstance(result, dict) and result.get("n_paths") == 0:
+            self._on_empty(stage, kwargs, result, "No water bridges found", warning)
+            return
+        if stage == "cluster" and isinstance(result, dict) and result.get("n_clusters") == 0:
+            self._on_empty(stage, kwargs, result, "No recurring channels", warning)
+            return
+        self._on_success(stage, kwargs, result, warning)
 
-    def _on_success(self, stage, kwargs, result):
+    def _on_empty(self, stage, kwargs, result, title, warning):
+        """A step that ran correctly but produced nothing to continue with."""
+        files = forms.result_files(stage, kwargs, result)
+        folder = os.path.dirname(files[0]) if files else self.outdir()
+        self.status_var.set(f"{title}. See the message for what to change.")
+        self.show_warning(title, (warning or title + ".") + f"\n\nThe (empty) result was saved in: {folder}")
+
+    def _on_success(self, stage, kwargs, result, warning=None):
         files = forms.result_files(stage, kwargs, result)
         folder = os.path.dirname(files[0]) if files else self.outdir()
         for path in files:
@@ -824,8 +846,15 @@ class GephyraApp:
                 self.vars["visualize"]["data"].set(out)
             summary = result or {}
             headline = "Analysis complete"
-            body = (f"{summary.get('n_paths', '?')} water-bridge paths found in {summary.get('n_frames', '?')} frames."
-                    if summary else "The pathway data was written successfully.")
+            if summary and summary.get("n_frames_with_paths") is not None:
+                body = (f"{summary['n_paths']} water-bridge paths found in {summary['n_frames_with_paths']} of "
+                        f"{summary['n_frames']} analysed frames.")
+            elif summary:
+                body = f"{summary.get('n_paths', '?')} water-bridge paths found in {summary.get('n_frames', '?')} frames."
+            else:
+                body = "The pathway data was written successfully."
+            if warning:
+                body += "\n\nNote: " + warning
             next_action = ("Next: Clustering  →", lambda: self.show_stage("cluster"))
         elif stage == "cluster":
             out = kwargs["output_file"]
@@ -907,7 +936,7 @@ class GephyraApp:
         top.configure(background=p["surface"])
         top.transient(self.master)
         top.resizable(False, False)
-        colour = {"success": p["success"], "error": p["error"]}.get(kind, p["accent"])
+        colour = {"success": p["success"], "error": p["error"], "warning": p["warning"]}.get(kind, p["accent"])
         body = tk.Frame(top, background=p["surface"], padx=28, pady=22)
         body.pack(fill="both", expand=True)
         head = tk.Frame(body, background=p["surface"])
@@ -918,7 +947,7 @@ class GephyraApp:
         ink = p["surface"]
         if kind == "success":
             icon.create_line(9, 15, 13, 20, 21, 10, fill=ink, width=3, capstyle="round", joinstyle="round")
-        elif kind == "error":
+        elif kind in ("error", "warning"):
             icon.create_line(15, 8, 15, 17, fill=ink, width=3, capstyle="round")
             icon.create_oval(13, 20, 17, 24, fill=ink, outline=ink)
         else:
@@ -968,6 +997,9 @@ class GephyraApp:
 
     def show_error(self, title, message):
         return self._dialog(title, message, kind="error")
+
+    def show_warning(self, title, message):
+        return self._dialog(title, message, kind="warning")
 
     def show_info(self, title, message):
         return self._dialog(title, message, kind="info")

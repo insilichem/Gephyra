@@ -344,7 +344,8 @@ def story():
                   "clusters</b> limits the picture to the most occupied ones. Enter a <b>Cluster ID</b> to rebuild "
                   "that one cluster as real water molecules at the frame it comes from."],
                  ["frame", "results file (step 1)", "One frame: the real water molecules (oxygen and hydrogens) and every "
-                  "water bridge as a dashed bond. Choose the frame number in <b>Frame</b>."],
+                  "water bridge as a dashed bond. Choose the frame number in <b>Frame</b>; leave it empty to draw the first frame "
+                  "with water bridges. If a frame has none, the message lists the frames that do."],
                  ["density", "results file (step 1)", "Every path of every frame as thin transparent tubes, showing "
                   "where water bridges form most often."]],
                 [2.0 * cm, 3.4 * cm, 11.1 * cm]),

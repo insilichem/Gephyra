@@ -104,6 +104,20 @@ def _resolve_frame(frames, frame_idx):
         logger.warning(f"Frame {frame_idx} not found in data (available: {preview}). Using frame {first} instead.")
     return first
 
+def _bridge_frames_hint(with_paths, n_frames, shown=12):
+    """Which analysed frames have water bridges, so the user can pick one."""
+    listed = ", ".join(with_paths[:shown]) + (", ..." if len(with_paths) > shown else "")
+    return (f"Water bridges were found in {len(with_paths)} of {n_frames} analysed frames: {listed}. "
+            "Choose one of these frame numbers; they are also listed in the first column ('Frame') of the "
+            "CSV summary written by step 1.")
+
+
+def _no_bridges_message(data_file, frames):
+    return (f"No water bridges were found in any of the {len(frames)} frames of {os.path.basename(data_file)}, "
+            "so there is nothing to draw. See the warning from step 1 (calculate): try a smaller stride, and "
+            "check the root and water selections.")
+
+
 def _rgb_hex(rgb):
     return "#{:02x}{:02x}{:02x}".format(*(int(round(c * 255)) for c in rgb))
 
@@ -181,13 +195,26 @@ def build_plan(data_file, mode, frame_idx=None, cluster_id=None, max_bond_draw_d
 
     if mode == "frame":
         frames = read_jsonl(data_file)
-        key = _resolve_frame(frames, frame_idx)
-        if key is None:
+        if not frames:
             logger.error("No frames available for visualization.")
             return None
+        with_paths = [k for k in frames if frames[k]]
+        if not with_paths:
+            logger.warning(_no_bridges_message(data_file, frames))
+            return None
+        if frame_idx is None:
+            key = with_paths[0]
+            logger.info(f"No frame given: drawing frame {key}, the first one with water bridges.")
+        elif str(frame_idx) in frames:
+            key = str(frame_idx)
+        else:
+            key = with_paths[0]
+            logger.warning(f"Frame {frame_idx} was not analysed (see the stride used in step 1). "
+                           f"Drawing frame {key} instead. {_bridge_frames_hint(with_paths, len(frames))}")
         paths = frames[key]
         if not paths:
-            logger.warning(f"No paths found for frame {key}. Nothing to draw.")
+            logger.warning(f"No paths found for frame {key}. Nothing to draw. "
+                           f"{_bridge_frames_hint(with_paths, len(frames))}")
             return None
         plan = Plan("frame", f"frame {key}", source, frame=int(key))
         plan.legend.append((f"Frame {key}: {len(paths)} paths", FRAME_RGB))
@@ -216,6 +243,9 @@ def build_plan(data_file, mode, frame_idx=None, cluster_id=None, max_bond_draw_d
         if not frames:
             logger.error("No frames available for visualization.")
             return None
+        if not any(frames.values()):
+            logger.warning(_no_bridges_message(data_file, frames))
+            return None
         coords = [p["coords"] for paths in frames.values() for p in paths]
         plan = Plan("density", f"density over {len(frames)} frames", source)
         plan.groups.append(_group_for_path_coords("Density", DENSITY_RGB, coords, max_bond_draw_dist, 0.1,
@@ -237,7 +267,9 @@ def build_plan(data_file, mode, frame_idx=None, cluster_id=None, max_bond_draw_d
             clusters = clusters[:top_clusters]
         clusters = [c for c in clusters if len(c.get("medoid_coords", [])) >= 2]
         if not clusters:
-            logger.warning("No clusters to draw.")
+            logger.warning(f"{os.path.basename(data_file)} contains no clusters, so there is nothing to draw: "
+                           "no pathway recurred in at least two frames. See the warning from step 2 (cluster) "
+                           "for what to change, or draw single frames from the step-1 results with mode 'frame'.")
             return None
 
         def legend_text(c, n):

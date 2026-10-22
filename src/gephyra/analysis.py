@@ -41,6 +41,40 @@ def _write_clusters(output_file, clusters, source_metadata, cluster_params):
         json.dump({"type": "gephyra_clusters", "metadata": metadata, "clusters": clusters}, f, indent=2)
 
 
+def _no_channel_warning(source_metadata, threshold):
+    """Why clustering kept no channel, and what to try."""
+    hints = []
+    if not source_metadata.get("alignment"):
+        hints.append("the frames were not superposed, so the same channel can sit at different coordinates in "
+                     "different frames: re-run step 1 with superposition (the default)")
+    stride = source_metadata.get("parameters", {}).get("stride", 1)
+    hints.append("analyse more frames (a smaller stride in step 1)" if stride and stride > 1 else "analyse more frames")
+    hints.append(f"or raise the Fréchet threshold (now {threshold} Å)")
+    return ("No recurring channel was found: none of the pathways appears in at least two frames. Try: "
+            + "; ".join(hints) + ".")
+
+
+def coverage_warning(n_frames_with_paths, n_analysed, stride=1, n_trajectory_frames=None):
+    """
+    Explanation (with what to try) when an analysis found no water bridges, or
+    found them in too few frames for clustering; None when coverage is fine.
+    """
+    n_total = n_trajectory_frames or n_analysed
+    stride_hint = ""
+    if stride and stride > 1:
+        stride_hint = (f" Only {n_analysed} of {n_total} trajectory frames were analysed (stride {stride}); "
+                       "decreasing the stride analyses more frames and may find more bridges.")
+    if n_frames_with_paths == 0:
+        return (f"No water bridges were found in any of the {n_analysed} analysed frames.{stride_hint} "
+                "Also check that the root selection is a hydrogen-bond donor or acceptor (N, O, S, F, Cl, Br) "
+                "in contact with the solvent, and that the water selection matches your solvent's residue names.")
+    if n_frames_with_paths < 2:
+        return (f"Water bridges were found in only {n_frames_with_paths} of {n_analysed} analysed frames. "
+                "Clustering keeps channels that appear in at least two frames, so it will find none."
+                + (stride_hint or " Analyse more frames to obtain recurring channels."))
+    return None
+
+
 def compute_persistence(frame_indices_sorted, total_frames, stride):
     """
     Calculates the mean and maximum continuous run-lengths of frames.
@@ -138,9 +172,11 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
         total_frames = len(frame_set)
 
     if not unique_paths:
-        logger.info("No paths found to cluster.")
+        message = (f"No water bridges were found in any frame of {os.path.basename(data_file)}, so there is "
+                   "nothing to cluster. Re-run step 1 (calculate) with different settings; see its warning.")
+        logger.warning(message)
         _write_clusters(output_file, [], source_metadata, cluster_params)
-        return {'output_file': os.path.abspath(output_file), 'n_clusters': 0}
+        return {'output_file': os.path.abspath(output_file), 'n_clusters': 0, 'n_paths': 0, 'warning': message}
 
     # Build candidate list — all unique paths proceed to spatial clustering.
     filtered_paths = []
@@ -234,9 +270,10 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
         # Same stability rule as the multi-path branch below: a channel seen in
         # fewer than two frames is thermal noise.
         if len(frames_val) < 2:
-            logger.info("The only remaining path occurs in fewer than 2 frames; discarded as thermal noise.")
+            warning = _no_channel_warning(source_metadata, threshold)
+            logger.warning(warning)
             _write_clusters(output_file, [], source_metadata, cluster_params)
-            return {'output_file': os.path.abspath(output_file), 'n_clusters': 0}
+            return {'output_file': os.path.abspath(output_file), 'n_clusters': 0, 'n_paths': 1, 'warning': warning}
 
         medoid_frame = int(min(frames_val))
         mean_pers, max_pers = compute_persistence(sorted(frames_val), total_frames, stride)
@@ -366,7 +403,11 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
     _write_clusters(output_file, clusters_data, source_metadata, cluster_params)
 
     logger.info(f"Clustering complete. Results saved to {output_file}")
-    return {'output_file': os.path.abspath(output_file), 'n_clusters': len(clusters_data)}
+    result = {'output_file': os.path.abspath(output_file), 'n_clusters': len(clusters_data), 'n_paths': n_filtered}
+    if not clusters_data:
+        result['warning'] = _no_channel_warning(source_metadata, threshold)
+        logger.warning(result['warning'])
+    return result
 
 
 def validate_calculation_parameters(stride=1, max_depth=10, min_depth=1, cooperativity=0.92, coarse_cutoff=4.5):
@@ -521,6 +562,11 @@ def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resna
                 f"(normalized: {normalize_hquality(avg_hquality):.4f})")
     logger.info(f"Results saved to {output_file}")
 
+    frames_with_paths = sorted(set().union(*path_frequency.values())) if path_frequency else []
+    warning = coverage_warning(len(frames_with_paths), total_processed, stride, n_frames)
+    if warning:
+        logger.warning(warning)
+
     if cluster:
         import warnings
         warnings.warn(
@@ -539,8 +585,11 @@ def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resna
         "output_file": os.path.abspath(output_file),
         "csv_file": os.path.abspath(csv_file) if csv_file else None,
         "n_frames": total_processed,
+        "n_trajectory_frames": n_frames,
+        "n_frames_with_paths": len(frames_with_paths),
         "n_paths": total_paths,
         "avg_length": avg_length,
+        "warning": warning,
     }
 
 

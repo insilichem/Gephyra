@@ -327,7 +327,7 @@ How the snapshot is built:
 | `--data` | required | `--mode cluster` expects the cluster file written by `cluster`; `--mode density` and `--mode frame` expect the `.jsonl` written by `calculate`. Passing the wrong one is reported as an error. |
 | `--format` | `vmd` | `chimerax` (`.cxc`), `chimera` (`.py`), `pymol` (`.py`) or `vmd` (`.tcl`). |
 | `--mode` | `density` | `frame`, `cluster` or `density` (see above). |
-| `--frame` | — | Trajectory frame index for `--mode frame`. If omitted, or not in the data (e.g. skipped by `--stride`), the first stored frame is used and a warning is logged. |
+| `--frame` | — | Trajectory frame index for `--mode frame`. If omitted, the first frame with water bridges is drawn. If the frame was not analysed (skipped by `--stride`) or has no bridges, the warning lists the frames that do have them (also the `Frame` column of the CSV summary). |
 | `--cluster_id` | — | Draw only this cluster (its sequential rank), rebuilt as molecules. |
 | `--top_clusters` | all | Draw only the N most occupied clusters. |
 | `--topo`, `--traj` | from the data file | The analysed system. Only needed for older result files that do not record them, or if the files have moved. |

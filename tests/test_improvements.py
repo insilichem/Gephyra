@@ -281,3 +281,99 @@ class TestCLI(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestEmptyResultMessages(unittest.TestCase):
+    """Empty or thin results must say why and what to change."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def p(self, *parts):
+        return os.path.join(self.tmp, *parts)
+
+    def test_coverage_warning(self):
+        from gephyra.analysis import coverage_warning
+        self.assertIsNone(coverage_warning(5, 10))
+        none = coverage_warning(0, 112, stride=100, n_trajectory_frames=11200)
+        self.assertIn("No water bridges were found in any of the 112 analysed frames", none)
+        self.assertIn("Only 112 of 11200 trajectory frames were analysed (stride 100)", none)
+        self.assertIn("decreasing the stride", none)
+        self.assertNotIn("stride", coverage_warning(0, 10, stride=1).split("analysed frames.")[1].split("Also")[0])
+        one = coverage_warning(1, 50, stride=10, n_trajectory_frames=500)
+        self.assertIn("only 1 of 50", one)
+        self.assertIn("at least two frames", one)
+
+    def test_analysis_without_bridges_reports_it(self):
+        u = mda.Universe.empty(4, trajectory=True, n_residues=4, atom_resindex=[0, 1, 2, 3])
+        u.add_TopologyAttr('resname', ['LIG', 'SOL', 'SOL', 'SOL'])
+        u.add_TopologyAttr('name', ['O1', 'OW', 'OW', 'OW'])
+        u.add_TopologyAttr('resid', [1, 2, 3, 4])
+        u.atoms.positions = np.array([[0.0, 0, 0], [12.0, 0, 0], [14.8, 0, 0], [17.6, 0, 0]])  # water far away
+        u.dimensions = np.array([50.0, 50.0, 50.0, 90.0, 90.0, 90.0])
+        pdb = self.p("far.pdb")
+        u.atoms.write(pdb)
+        with self.assertLogs("gephyra.analysis", level="WARNING") as logs:
+            summary = run_analysis(pdb, pdb, "resname LIG", water_sel="resname SOL", output_file=self.p("r.jsonl"))
+        self.assertEqual(summary["n_paths"], 0)
+        self.assertEqual(summary["n_frames_with_paths"], 0)
+        self.assertIn("No water bridges were found", summary["warning"])
+        self.assertIn("No water bridges were found", "\n".join(logs.output))
+
+        with self.assertLogs("gephyra.analysis", level="WARNING"):
+            result = cluster_pathways(self.p("r.jsonl"), output_file=self.p("c.json"))
+        self.assertEqual(result["n_clusters"], 0)
+        self.assertIn("nothing to cluster", result["warning"])
+
+    def test_no_recurring_channel_explains_superposition_and_stride(self):
+        path_a = {"nodes": [0, 1], "coords": [[0, 0, 0], [2.8, 0, 0]], "hquality": 0.5}
+        path_b = {"nodes": [0, 2], "coords": [[30, 0, 0], [32.8, 0, 0]], "hquality": 0.5}
+        with open(self.p("r.jsonl"), "w") as f:
+            f.write(json.dumps({"type": "metadata", "n_frames_analyzed": 2, "alignment": None,
+                                "parameters": {"stride": 50}}) + "\n")
+            f.write(json.dumps({"type": "frame", "frame_idx": 0, "paths": [path_a]}) + "\n")
+            f.write(json.dumps({"type": "frame", "frame_idx": 50, "paths": [path_b]}) + "\n")
+        with self.assertLogs("gephyra.analysis", level="WARNING"):
+            result = cluster_pathways(self.p("r.jsonl"), threshold=3.0, output_file=self.p("c.json"))
+        self.assertEqual(result["n_clusters"], 0)
+        for needle in ("at least two frames", "not superposed", "smaller stride", "Fréchet threshold"):
+            self.assertIn(needle, result["warning"])
+
+    def _frames_file(self):
+        path = {"nodes": [0, 1], "atom_ids": [1, 2], "coords": [[0, 0, 0], [2.8, 0, 0]], "hquality": 0.5}
+        with open(self.p("r.jsonl"), "w") as f:
+            f.write(json.dumps({"type": "metadata", "n_frames_analyzed": 3, "parameters": {"stride": 100}}) + "\n")
+            for idx, paths in ((0, []), (100, [path]), (200, [path])):
+                f.write(json.dumps({"type": "frame", "frame_idx": idx, "paths": paths}) + "\n")
+        return self.p("r.jsonl")
+
+    def test_frame_mode_defaults_to_first_frame_with_bridges(self):
+        data = self._frames_file()
+        files = run_visualization(data, format="vmd", mode="frame", output_file=self.p("v"), with_structure=False)
+        self.assertTrue(files)
+        self.assertIn("frame 100", open(files[0]).read())
+
+    def test_empty_frame_lists_the_frames_that_have_bridges(self):
+        data = self._frames_file()
+        with self.assertLogs("gephyra.visualize", level="WARNING") as logs:
+            files = run_visualization(data, format="vmd", mode="frame", frame_idx=0, output_file=self.p("v"),
+                                      with_structure=False)
+        self.assertIsNone(files)
+        text = "\n".join(logs.output)
+        self.assertIn("No paths found for frame 0. Nothing to draw.", text)
+        self.assertIn("2 of 3 analysed frames: 100, 200", text)
+        self.assertIn("first column ('Frame') of the CSV summary", text)
+
+    def test_all_empty_frames_say_so(self):
+        with open(self.p("e.jsonl"), "w") as f:
+            f.write(json.dumps({"type": "metadata", "n_frames_analyzed": 2}) + "\n")
+            for idx in (0, 1):
+                f.write(json.dumps({"type": "frame", "frame_idx": idx, "paths": []}) + "\n")
+        for mode in ("frame", "density"):
+            with self.subTest(mode=mode), self.assertLogs("gephyra.visualize", level="WARNING") as logs:
+                self.assertIsNone(run_visualization(self.p("e.jsonl"), format="pymol", mode=mode,
+                                                    output_file=self.p("v"), with_structure=False))
+            self.assertIn("No water bridges were found in any of the 2 frames", "\n".join(logs.output))
