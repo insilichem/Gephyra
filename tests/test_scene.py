@@ -345,3 +345,95 @@ class TestAlignment(unittest.TestCase):
                                alignment=meta["alignment"])
         root = mda.Universe(scene.pdb_path).select_atoms(f"chainID {scene.root_chain}").positions[0]
         np.testing.assert_allclose(root, frames[0]["paths"][0]["coords"][0], atol=0.05)
+
+
+def make_cofactor_system(path):
+    """
+    A hypothetical protein residue (ALA) with a cofactor (COF) and a metal (MTL)
+    covalently bonded to it - so all three form one molecule, as with a
+    parameterised metal centre - plus a separate ligand LIG and two waters.
+    """
+    names = ["N", "CA", "C", "O", "C1", "C2", "O3", "FE", "O1", "O", "H1", "H2", "O", "H1", "H2"]
+    resnames = ["ALA", "COF", "MTL", "LIG", "WAT", "WAT"]
+    resindex = [0, 0, 0, 0, 1, 1, 1, 2, 3, 4, 4, 4, 5, 5, 5]
+    u = mda.Universe.empty(len(names), n_residues=6, atom_resindex=resindex, trajectory=True)
+    u.add_TopologyAttr("name", names)
+    u.add_TopologyAttr("resname", resnames)
+    u.add_TopologyAttr("resid", [1, 2, 3, 4, 5, 6])
+    u.add_TopologyAttr("elements", ["N", "C", "C", "O", "C", "C", "O", "Fe", "O", "O", "H", "H", "O", "H", "H"])
+    u.add_TopologyAttr("masses", [14.0, 12.0, 12.0, 16.0, 12.0, 12.0, 16.0, 55.8, 16.0, 16.0, 1.0, 1.0, 16.0, 1.0, 1.0])
+    u.atoms.positions = np.array([
+        [10.0, 10, 10], [11.4, 10, 10], [12.0, 11.3, 10], [11.4, 12.3, 10],     # ALA
+        [12.0, 8.7, 10], [13.5, 8.7, 10], [14.2, 7.6, 10],                     # COF bonded to CA
+        [12.0, 7.0, 11.5],                                                      # MTL bonded to COF
+        [16.0, 7.6, 10],                                                        # LIG O1 (root)
+        [18.8, 7.6, 10], [19.4, 8.4, 10], [19.4, 6.8, 10],                      # water 1
+        [21.6, 7.6, 10], [22.2, 8.4, 10], [22.2, 6.8, 10]])                     # water 2
+    u.dimensions = np.array([60.0, 60.0, 60.0, 90.0, 90.0, 90.0])
+    u.add_TopologyAttr("bonds", [(0, 1), (1, 2), (2, 3), (1, 4), (4, 5), (5, 6), (4, 7), (9, 10), (9, 11),
+                                 (12, 13), (12, 14)])
+    u.atoms.write(path, bonds="all")
+    return mda.Universe(path)
+
+
+class TestCofactorsAreShown(unittest.TestCase):
+    """Cofactors bonded to the protein must still be drawn (not only as cartoon)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.pdb = os.path.join(self.tmp, "cof.pdb")
+        self.u = make_cofactor_system(self.pdb)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def p(self, *parts):
+        return os.path.join(self.tmp, *parts)
+
+    def _scene(self):
+        return write_snapshot(self.u, 0, self.p("snap.pdb"), "resname LIG", "resname WAT", paths=[[8, 9, 12]])
+
+    def test_bonded_cofactor_is_classified_as_hetero(self):
+        scene = self._scene()
+        self.assertEqual(scene.hetero_resnames, ["COF", "MTL"])
+        self.assertEqual(scene.metal_resnames, ["MTL"])
+        records = {line[17:20]: line[:6].strip() for line in open(scene.pdb_path) if line.startswith(("ATOM", "HETATM"))}
+        self.assertEqual(records["ALA"], "ATOM")
+        for resname in ("COF", "MTL", "LIG", "WAT"):
+            self.assertEqual(records[resname], "HETATM", resname)
+        # Bonded to the protein, so it keeps the protein's chain: chains alone cannot find it.
+        chains = {line[17:20]: line[21] for line in open(scene.pdb_path) if line.startswith(("ATOM", "HETATM"))}
+        self.assertEqual(chains["COF"], chains["ALA"])
+
+    def test_every_viewer_script_shows_the_cofactor(self):
+        from gephyra.visualize import Plan, write_chimera, write_chimerax, write_pymol, write_vmd
+        plan = Plan("frame", "frame 0", "test", scene=self._scene(), frame=0)
+        expected = {
+            write_chimerax: ["show #101:COF,MTL target a", "style #101:MTL ball", "view #101/W | #101/Y | #101:COF,MTL"],
+            write_pymol: ["cmd.show('sticks', 'gephyra_structure and resn COF+MTL')",
+                          "cmd.show('spheres', 'gephyra_structure and resn MTL')"],
+            write_chimera: ["('COF', 'MTL')", "represent ball %s:MTL"],
+            write_vmd: ["mol selection {resname COF MTL}", "mol representation VDW", "or resname COF MTL"],
+        }
+        for writer, needles in expected.items():
+            with self.subTest(viewer=writer.__name__):
+                ext = ".cxc" if writer is write_chimerax else ".tcl" if writer is write_vmd else ".py"
+                script = writer(plan, self.p(writer.__name__ + ext))[0]
+                text = open(script).read()
+                for needle in needles:
+                    self.assertIn(needle, text)
+
+    @unittest.skipUnless(os.environ.get("GEPHYRA_TEST_VIEWERS") and shutil.which("chimerax"),
+                         "set GEPHYRA_TEST_VIEWERS=1 with chimerax on PATH")
+    def test_chimerax_displays_the_cofactor_atoms(self):
+        from gephyra.visualize import Plan, write_chimerax
+        plan = Plan("frame", "frame 0", "test", scene=self._scene(), frame=0)
+        script = write_chimerax(plan, self.p("scene.cxc"))[0]
+        check = self.p("check.cxc")
+        with open(check, "w") as f:
+            f.write(f'open "{script}"\ninfo atoms #101:COF,MTL attribute display\n')
+        out = subprocess.run(["chimerax", "--nogui", "--exit", "--cmd", f'open "{check}"'],
+                             capture_output=True, text=True, timeout=300).stdout
+        shown = [line for line in out.splitlines() if line.startswith("atom id") and "display" in line]
+        self.assertTrue(shown)
+        self.assertTrue(all(line.endswith("True") for line in shown), shown)

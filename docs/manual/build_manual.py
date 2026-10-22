@@ -335,7 +335,8 @@ def story():
 
     s += [PageBreak(), H1("6. Step 3 - Visualization"),
           P("Writes a script that opens a complete scene in your molecular viewer: the protein as a cartoon, the "
-            "ligand and the bridging waters as sticks, and the water network drawn on top."),
+            "ligand and the bridging waters as sticks, any cofactor or metal complex as sticks (metal ions as "
+            "spheres), and the water network drawn on top."),
           screenshot("06_visualization.png"),
           H2("Choosing what to draw"),
           table([["Mode", "Input file", "What the scene shows"],

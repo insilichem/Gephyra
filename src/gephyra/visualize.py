@@ -350,6 +350,13 @@ def write_vmd(plan, output_file):
                    "mol selection {protein or nucleic}\nmol material AOChalky\nmol addrep $gmol\n")
         out.append("mol representation Licorice 0.25 12.0 12.0\nmol color Name\n"
                    "mol selection {not (protein or nucleic)}\nmol material Opaque\nmol addrep $gmol\n")
+        if s.hetero_resnames:
+            # Cofactors bonded to the protein count as protein for VMD; show them explicitly.
+            out.append(f"mol representation Licorice 0.25 12.0 12.0\nmol color Name\n"
+                       f"mol selection {{resname {' '.join(s.hetero_resnames)}}}\nmol addrep $gmol\n")
+        if s.metal_resnames:
+            out.append(f"mol representation VDW 0.45 16.0\nmol color Name\n"
+                       f"mol selection {{resname {' '.join(s.metal_resnames)}}}\nmol addrep $gmol\n")
         out.append(f"mol representation Licorice 0.30 12.0 12.0\nmol color ColorID 7\n"
                    f"mol selection {{chain {s.root_chain} and carbon}}\nmol addrep $gmol\n")
         if s.bridge_coords:
@@ -397,7 +404,8 @@ def write_vmd(plan, output_file):
     out.append("display resetview\naxes location off\n")
     if s:
         # Centre on the ligand and waters rather than the whole protein.
-        out.append(f"set gfocus [atomselect $gmol {{chain {s.root_chain} {s.water_chain}}}]\n"
+        het_sel = f" or resname {' '.join(s.hetero_resnames)}" if s.hetero_resnames else ""
+        out.append(f"set gfocus [atomselect $gmol {{chain {s.root_chain} {s.water_chain}{het_sel}}}]\n"
                    "if {[$gfocus num] > 0} { molinfo $gmol set center [list [measure center $gfocus]]; "
                    "translate to 0 0 0; scale by 2.2 }\n$gfocus delete\n")
     for text, rgb in plan.legend[:30]:
@@ -421,7 +429,13 @@ def write_pymol(plan, output_file):
                    "cmd.set('cartoon_color', 'lightblue', 'gephyra_structure')\n"
                    "cmd.show('sticks', 'gephyra_structure and not polymer')\n"
                    "cmd.color('grey70', 'gephyra_structure and not polymer and elem C')\n"
-                   f"cmd.color('green', 'gephyra_structure and chain {s.root_chain} and elem C')\n"
+                   + (f"cmd.show('sticks', 'gephyra_structure and resn {'+'.join(s.hetero_resnames)}')\n"
+                      f"cmd.color('wheat', 'gephyra_structure and resn {'+'.join(s.hetero_resnames)} and elem C')\n"
+                      if s.hetero_resnames else "")
+                   + (f"cmd.show('spheres', 'gephyra_structure and resn {'+'.join(s.metal_resnames)}')\n"
+                      f"cmd.set('sphere_scale', 0.45, 'gephyra_structure and resn {'+'.join(s.metal_resnames)}')\n"
+                      if s.metal_resnames else "")
+                   + f"cmd.color('green', 'gephyra_structure and chain {s.root_chain} and elem C')\n"
                    f"cmd.set('stick_radius', 0.18, 'gephyra_structure and chain {s.water_chain}')\n"
                    # PyMOL guesses bonds by distance and joins the two water H atoms
                    f"cmd.unbond('gephyra_structure and chain {s.water_chain} and elem H', "
@@ -447,7 +461,8 @@ def write_pymol(plan, output_file):
         out.append(f"cmd.load_cgo(obj, '{name}', state=1)\n" if named or i == 0 else
                    f"cmd.load_cgo(obj, '{name}_{i}', state=1)\n")
     if s and s.bridges:
-        out.append(f"cmd.orient('gephyra_structure and (chain {s.root_chain} or chain {s.water_chain})')\n")
+        het_sel = f" or resn {'+'.join(s.hetero_resnames)}" if s.hetero_resnames else ""
+        out.append(f"cmd.orient('gephyra_structure and (chain {s.root_chain} or chain {s.water_chain}{het_sel})')\n")
     elif s and groups:
         # CGO objects cannot be used in selections: zoom on a temporary
         # pseudoatom at the centre of the drawn network instead.
@@ -503,10 +518,11 @@ def write_chimera(plan, output_file):
                    "spec = '#%d' % mol.id\n"
                    "rc('~display ' + spec)\nrc('ribbon ' + spec)\nrc('ribcolor 0.69,0.77,0.87 ' + spec)\n"
                    f"het = [a for r in mol.residues if r.isHet or r.id.chainId in ('{s.root_chain}', '{s.water_chain}') "
-                   "for a in r.atoms]\n"
+                   f"or r.type in {tuple(s.hetero_resnames)!r} for a in r.atoms]\n"
                    "selection.setCurrent(het)\n"
                    "rc('display sel')\nrc('represent stick sel')\nrc('color byhet sel')\nselection.setCurrent([])\n"
-                   f"rc('color 0.13,0.55,0.13,a %s:.{s.root_chain}@C=' % spec)\n")
+                   f"rc('color 0.13,0.55,0.13,a %s:.{s.root_chain}@C=' % spec)\n"
+                   + (f"rc('represent ball %s:{','.join(s.metal_resnames)}' % spec)\n" if s.metal_resnames else ""))
         if s.bridges:
             out.append("from chimera.misc import getPseudoBondGroup\n"
                        "by_serial = dict((a.serialNumber, a) for a in mol.atoms)\n"
@@ -536,7 +552,9 @@ def write_chimera(plan, output_file):
         out.append("except Exception:\n")
         out.append(f"    print({chr(10).join(t for t, _ in plan.legend[:20])!r})\n")
     if s and s.bridges:
-        out.append(f"rc('focus %s:.{s.water_chain} %s:.{s.root_chain}' % (spec, spec))\n")
+        het_focus = f" %s:{','.join(s.hetero_resnames)}" if s.hetero_resnames else ""
+        out.append(f"rc('focus %s:.{s.water_chain} %s:.{s.root_chain}{het_focus}' % (spec, spec"
+                   + (", spec" if s.hetero_resnames else "") + "))\n")
     else:
         out.append("rc('focus')\n")
     with open(output_file, "w") as f:
@@ -592,6 +610,12 @@ def write_chimerax(plan, output_file, model_spec=None):
                    f"show {sticks} target a\nstyle {sticks} stick\n"
                    f"color {sticks} byhetero\ncolor {mid}/{s.root_chain} & C forestgreen\n"
                    f"size {mid}/{s.water_chain} stickRadius 0.15\n")
+        if s.hetero_resnames:
+            # Cofactors and metal complexes, also when bonded to the protein's chain.
+            het = f"{mid}:{','.join(s.hetero_resnames)}"
+            out.append(f"show {het} target a\nstyle {het} stick\ncolor {het} byhetero\ncolor {het} & C tan\n")
+        if s.metal_resnames:
+            out.append(f"style {mid}:{','.join(s.metal_resnames)} ball\n")
         if plan.groups:
             bild = _write_bild(stem + ".bild", plan)
             written.append(os.path.abspath(bild))
@@ -605,7 +629,9 @@ def write_chimerax(plan, output_file, model_spec=None):
             written.append(pb)
             out.append(f"open {_cxc_quote(pb)} id {n + 2}\n")
         out.extend(_chimerax_legend(plan))
-        focus = f"{mid}/{s.water_chain} | {mid}/{s.root_chain}" if s.bridges else f"{mid} {gid}" if plan.groups else mid
+        het_focus = f" | {mid}:{','.join(s.hetero_resnames)}" if s.hetero_resnames else ""
+        focus = (f"{mid}/{s.water_chain} | {mid}/{s.root_chain}{het_focus}" if s.bridges
+                 else f"{mid} {gid}" if plan.groups else mid)
         out.append(f"view {focus}\nlighting soft\ngraphics silhouettes true\n")
     else:
         model_spec = validate_chimerax_model(model_spec or "#1")

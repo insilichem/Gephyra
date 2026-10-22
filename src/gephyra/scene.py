@@ -20,6 +20,7 @@ analysis.
 
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -46,6 +47,11 @@ class Scene:
     root_chain: str = "Y"         # chain ID given to the root residue(s) in the snapshot
     water_chain: str = "W"        # chain ID given to the bridging waters
     root_serials: list = field(default_factory=list)    # every atom of the root residue(s)
+    # Residue names of non-polymer solute groups other than the root: cofactors,
+    # metal complexes, renamed metal-binding residues. They are drawn as sticks
+    # even when they are bonded to (and share a chain with) the protein.
+    hetero_resnames: list = field(default_factory=list)
+    metal_resnames: list = field(default_factory=list)   # single-atom hetero residues (metal ions)
     water_serials: list = field(default_factory=list)   # every atom of the bridging waters
     bridges: list = field(default_factory=list)         # (serial_a, serial_b) heavy-atom pairs along paths
     bridge_coords: list = field(default_factory=list)   # ((x, y, z), (x, y, z)) for each bridge
@@ -272,6 +278,25 @@ def write_snapshot(u, frame, out_pdb, root_sel, water_sel, paths=(), context_sel
     if not hasattr(snap.atoms, "chainIDs"):
         snap.add_TopologyAttr("chainIDs")
     snap.atoms.chainIDs = chains.astype(str)
+
+    # Non-polymer groups: everything in the solute that is not a standard
+    # amino acid or nucleotide (by MDAnalysis' residue-name lists). Bonded
+    # cofactors such as metal complexes share the protein's molecule and chain,
+    # so they must be found by residue type, not by chain.
+    polymer = set(u.select_atoms("protein or nucleic").residues.ix)
+    root_ix = set(root_res.residues.ix)
+    hetero = [r for r in solute.residues if r.ix not in polymer and r.ix not in root_ix]
+    spec_safe = re.compile(r"^[A-Za-z0-9_]+$")
+    hetero_resnames = sorted({r.resname for r in hetero if spec_safe.match(str(r.resname))})
+    metal_resnames = sorted({r.resname for r in hetero if len(_drop_virtual_sites(r.atoms)) == 1
+                             and spec_safe.match(str(r.resname))})
+    # HETATM records let every viewer recognise them as non-polymer groups.
+    hetero_atoms = np.isin(group.indices, np.concatenate([r.atoms.ix for r in hetero] + [root_res.ix]))
+    hetero_atoms[offset:] = True
+    record = np.where(hetero_atoms, "HETATM", "ATOM").astype(object)
+    if not hasattr(snap.atoms, "record_types"):
+        snap.add_TopologyAttr("record_types")
+    snap.atoms.record_types = record
     if len(water_res_atoms):
         n_sol_res = len(solute.residues)
         snap.residues[n_sol_res:].resids = np.arange(1, len(water_res_atoms.residues) + 1)
@@ -304,6 +329,8 @@ def write_snapshot(u, frame, out_pdb, root_sel, water_sel, paths=(), context_sel
         n_atoms=len(group),
         root_chain=root_chain,
         water_chain=water_chain,
+        hetero_resnames=hetero_resnames,
+        metal_resnames=metal_resnames,
         root_serials=sorted(serial_of[int(i)] for i in root_res.indices if int(i) in serial_of),
         water_serials=list(range(offset + 1, len(group) + 1)),
         bridges=bridges,
