@@ -411,8 +411,9 @@ class TestGuiApp(_TmpDir):
         for name in ("sys.pdb", "traj.dcd"):
             open(self.p(name), "w").close()
         _write_jsonl(self.p("r.jsonl"), [(0, [PATH_A])])
-        self.errors, self.successes, self.questions = [], [], []
+        self.errors, self.successes, self.questions, self.warnings = [], [], [], []
         self.app.show_error = lambda t, m: self.errors.append((t, m))
+        self.app.show_warning = lambda t, m: self.warnings.append((t, m))
         self.app.show_info = lambda t, m: self.errors.append((t, m))
         self.app.show_success = lambda t, m, files, folder, next_action=None: self.successes.append((t, m, files, folder))
         self.app.ask_yes_no = lambda t, m: self.questions.append((t, m)) or True
@@ -524,6 +525,58 @@ class TestGuiApp(_TmpDir):
         message = self.successes[0][1]
         self.assertIn("vmd -e pathways_viz.tcl", message)
         self.assertIn("The -e is required", message)
+
+    def test_analysis_without_bridges_warns_instead_of_success(self):
+        self._fill_calculate()
+        self.runner_result = {"n_paths": 0, "n_frames": 112, "n_frames_with_paths": 0,
+                              "warning": "No water bridges were found in any of the 112 analysed frames. "
+                                         "Only 112 of 11200 trajectory frames were analysed (stride 100)."}
+        self.app.start("calculate")
+        self._wait()
+        self.assertEqual(self.successes, [])
+        title, message = self.warnings[0]
+        self.assertEqual(title, "No water bridges found")
+        self.assertIn("stride 100", message)
+
+    def test_thin_analysis_succeeds_with_a_note(self):
+        self._fill_calculate()
+        self.runner_result = {"n_paths": 7, "n_frames": 50, "n_frames_with_paths": 1,
+                              "warning": "Water bridges were found in only 1 of 50 analysed frames."}
+        self.app.start("calculate")
+        self._wait()
+        self.assertIn("7 water-bridge paths found in 1 of 50 analysed frames", self.successes[0][1])
+        self.assertIn("Note: Water bridges were found in only 1", self.successes[0][1])
+
+    def test_clustering_without_channels_warns(self):
+        self.app.vars["cluster"]["data"].set(self.p("r.jsonl"))
+        self.runner_result = {"n_clusters": 0, "warning": "No recurring channel was found."}
+        self.app.start("cluster")
+        self._wait()
+        self.assertEqual(self.successes, [])
+        self.assertEqual(self.warnings[0][0], "No recurring channels")
+
+    def test_visualization_failure_shows_the_reason(self):
+        import logging
+
+        def nothing_to_draw(_cb):
+            logging.getLogger("gephyra.visualize").warning(
+                "No paths found for frame 0. Nothing to draw. Water bridges were found in 12 of 112 analysed frames.")
+        self.runner_behaviour = nothing_to_draw
+        v = self.app.vars["visualize"]
+        v["data"].set(self.p("r.jsonl"))
+        v["mode"].set("frame")
+        original = self._runner
+
+        def runner(stage, kwargs, progress_callback=None):
+            original(stage, kwargs, progress_callback)
+            return None                       # no script written
+        self.app.runner = runner
+        self.app.start("visualize")
+        self._wait()
+        title, message = self.errors[0]
+        self.assertEqual(title, "Visualization failed")
+        self.assertIn("No paths found for frame 0", message)
+        self.assertNotIn("see the log", message)
 
     def test_runtime_exception_becomes_error_dialog(self):
         def boom(_cb):
