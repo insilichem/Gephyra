@@ -406,6 +406,7 @@ class TestGuiApp(_TmpDir):
         self.calls = []
         self.app = GephyraApp(self.root, runner=self._runner, theme="dark", settings_enabled=False)
         self.app.outdir_var.set(self.tmp)
+        self.app.estimate_first = False      # tested separately in test_estimate_*
         self.runner_behaviour = None
         self.runner_result = None
         for name in ("sys.pdb", "traj.dcd"):
@@ -577,6 +578,53 @@ class TestGuiApp(_TmpDir):
         self.assertEqual(title, "Visualization failed")
         self.assertIn("No paths found for frame 0", message)
         self.assertNotIn("see the log", message)
+
+    def _estimate_flow(self, answer):
+        self.app.estimate_first = True
+        self._fill_calculate()
+        estimate = {"estimate_s": 240.0, "hints": ["A stride of 200 instead of 100 would analyse 56 frames."],
+                    "summary": "Estimated runtime: about 4 min for 112 of 11200 frames (stride 100)."}
+        original = self._runner
+
+        def runner(stage, kwargs, progress_callback=None):
+            if stage == "estimate":
+                self.calls.append((stage, kwargs))
+                return estimate
+            return original(stage, kwargs, progress_callback)
+        self.app.runner = runner
+        shown = []
+        self.app._dialog = lambda title, message, **k: shown.append((title, message)) or answer
+        self.app.start("calculate")
+        self._wait()
+        if answer == "Run analysis":
+            self._wait()
+        return shown
+
+    def test_estimate_is_shown_before_the_analysis(self):
+        shown = self._estimate_flow("Run analysis")
+        self.assertEqual([c[0] for c in self.calls], ["estimate", "calculate"])
+        title, message = shown[0]
+        self.assertEqual(title, "Estimated runtime: about 4 min")
+        self.assertIn("112 of 11200 frames", message)
+        self.assertIn("A stride of 200", message)
+
+    def test_cancelling_the_estimate_does_not_run(self):
+        self._estimate_flow("Cancel")
+        self.assertEqual([c[0] for c in self.calls], ["estimate"])
+        self.assertIn("not started", self.app.status_var.get())
+
+    def test_status_shows_time_left(self):
+        def slow(cb):
+            for i in range(1, 4):
+                cb(i, 10)
+                time.sleep(0.05)
+        self.runner_behaviour = slow
+        seen = []
+        self.app.status_var.trace_add("write", lambda *_: seen.append(self.app.status_var.get()))
+        self._fill_calculate()
+        self.app.start("calculate")
+        self._wait()
+        self.assertTrue(any("left" in s and "/ 10" in s for s in seen), seen)
 
     def test_runtime_exception_becomes_error_dialog(self):
         def boom(_cb):

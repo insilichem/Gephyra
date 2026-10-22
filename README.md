@@ -163,6 +163,10 @@ The full walkthrough, with screenshots, is the PDF manual
   the result (paths found, clusters identified, how to open the script) and
   lists every file written with the folder they are in. From there you can open
   the folder, *Save a copy to…* another location, or go straight to the next step.
+- **Runtime estimate.** Before the analysis starts, Gephyra times a few sample
+  frames and shows how long the run will take, with tips to shorten it (a larger
+  stride, a smaller Max depth); you then start or cancel. During the run the
+  status line shows the time left.
 - **Validation before running.** Values are checked with the same rules as the
   CLI. A problem opens a dialog naming the field and moves the cursor to it.
 - **Live feedback.** The progress bar tracks frames (analysis) or distance-matrix
@@ -220,6 +224,7 @@ gephyra calculate \
 | `--cooperativity` | `0.92` | Geometric discount applied to successive hydrogen bonds along a chain: the *k*-th bond contributes its weight scaled by `cooperativity^(k-1)`. This models the polarisation that propagates along a water wire, which makes a bond embedded in a chain stronger than the same geometry in isolation. Values below 1.0 favour longer chains; `1.0` disables the effect and recovers the plain product of edge probabilities. |
 | `--coarse_cutoff` | `4.5` | Distance cutoff in Å for initial neighbour graph construction. |
 | `--align` | `auto` | Atoms used to superpose every frame onto the first analysed frame before path coordinates are stored (`auto`: protein Cα, or nucleic-acid P). This puts the same channel at the same coordinates in every frame even when the solute drifts or rotates through the box, which clustering needs. The choice is recorded in the output and reused by `visualize`. |
+| `--estimate` | off | Only estimate how long the analysis would take, by timing a few sample frames of the real system, then exit. The estimate reports the system size, the frames the stride selects, the time per frame, and tips such as the stride that would bring the run to about ten minutes. While an analysis runs, the log shows how much time is left. |
 | `--no_align` | off | Store path coordinates exactly as in the trajectory. Only for trajectories that are already fitted. |
 | `--output` | `results.jsonl` | Output file for full frame-by-frame path data (JSON Lines format). |
 | `--csv` | — | Optional human-readable CSV summary of detected paths (columns `Frame`, `Root_Residue`, `Path_Atom_Indices`, `Path_Length`, `HQuality_Z`, `HQuality_Norm`, `Average_OO_Distance`). |

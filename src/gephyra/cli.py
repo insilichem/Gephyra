@@ -69,6 +69,8 @@ def build_parser():
              "path coordinates are stored, so that clustering compares channels in a common frame "
              "even if the solute drifts or rotates. Default 'auto': protein C-alpha atoms "
              "(or nucleic-acid P).")
+    calc_parser.add_argument("--estimate", action="store_true",
+        help="Only estimate how long the analysis would take (by timing a few sample frames), then exit.")
     calc_parser.add_argument("--no_align", action="store_true",
         help="Store path coordinates exactly as in the trajectory (only for trajectories already fitted).")
     calc_parser.add_argument("--coarse_cutoff", type=_positive_float, default=4.5, help="Coarse distance cutoff (Angstroms) for initial graph building.")
@@ -169,6 +171,16 @@ def main(argv=None):
     return 0 if ok is not False else 1
 
 def _dispatch(args):
+    if args.command == "calculate" and args.estimate:
+        from .estimate import estimate_runtime
+        result = estimate_runtime(topo_file=args.topo, traj_file=args.traj, root_sel=args.root, water_sel=args.water,
+                                  stride=args.stride, max_depth=args.max_depth, coarse_cutoff=args.coarse_cutoff,
+                                  cooperativity=args.cooperativity)
+        print(result["summary"])
+        for hint in result["hints"]:
+            print("Tip: " + hint)
+        return True
+
     if args.command == "calculate":
         run_analysis(
             topo_file=args.topo,

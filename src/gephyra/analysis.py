@@ -4,12 +4,14 @@ import os
 import logging
 import csv
 import copy
+import time
 import MDAnalysis as mda
 import numpy as np
 
 from .core import build_graph, compute_edge_probabilities, traverse_network
 from .math_utils import pairwise_discrete_frechet, condensed_submatrix, normalize_hquality
 from .scene import minimum_image_chain
+from .estimate import format_duration
 from .results import load_clusters  # noqa: F401  (re-exported for convenience)
 
 logger = logging.getLogger(__name__)
@@ -635,9 +637,16 @@ def _process_trajectory(u, water_atoms, root_atoms, out_f, csv_writer, path_freq
     out_f.write(json.dumps(metadata) + '\n')
 
     frames_done = 0
+    started = time.perf_counter()
     for ts in u.trajectory[::stride]:
         frame_idx = ts.frame
-        logger.info(f"Analyzing frame {frame_idx}...")
+        if frames_done:
+            elapsed = time.perf_counter() - started
+            remaining = elapsed / frames_done * (total_processed - frames_done)
+            logger.info(f"Analyzing frame {frame_idx} ({frames_done + 1}/{total_processed}, "
+                        f"{format_duration(remaining)} left)...")
+        else:
+            logger.info(f"Analyzing frame {frame_idx} (1/{total_processed})...")
         transform = aligner.current_transform() if aligner is not None else None
 
         # 1. Build coarse graph

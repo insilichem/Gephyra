@@ -48,8 +48,8 @@ SCREENSHOTS = {
     "05_clustering_done.png": "The confirmation shown when clustering finishes.",
     "06_visualization.png": "Step 3, Visualization: viewer, mode and the molecular-scene section.",
     "07_script_ready.png": "The 'Script ready' confirmation with the command that opens the script.",
-    "08_scene_frame.png": "A frame scene in ChimeraX: protein cartoon, ligand, water molecules and dashed water bridges (hypothetical example system).",
-    "09_scene_clusters.png": "A cluster scene: colour-coded medoid paths around the protein, with the legend (hypothetical example system).",
+    "08_scene_frame.png": "A frame scene in ChimeraX: protein cartoon, ligand, water molecules and dashed water bridges.",
+    "09_scene_clusters.png": "A cluster scene: colour-coded medoid paths around the protein, with the legend.",
     "10_light_theme.png": "The same window in the light theme.",
 }
 
@@ -307,6 +307,16 @@ def story():
           tip("For a first look at a long trajectory, start with a stride of 10-50. The analysis time grows with the "
               "number of frames and with Max depth."),
           screenshot("02b_analysis_running.png", width=14 * cm),
+          H2("Runtime estimate"),
+          P("The analysis is the slowest step. When you click <b>Run analysis</b>, Gephyra first times a few sample "
+            "frames of your system (this takes a few seconds) and shows how long the whole run will take, together "
+            "with the size of the system: atoms, residues, water molecules, trajectory frames and how many of them "
+            "the stride selects. If the run would be long it also suggests how to shorten it, for example the stride "
+            "that would bring it to about ten minutes, or a smaller Max depth. Choose <b>Run analysis</b> to start "
+            "or <b>Cancel</b> to change the settings first."),
+          tip("What costs time is mostly the hydrogen-bond network around the root atom, which grows with Max depth "
+              "(each extra water layer adds a new shell of waters to score) and with the number of analysed frames. "
+              "System size matters less. While the analysis runs, the status line shows how much time is left."),
           P("Click <b>Run analysis</b>. The progress bar counts the frames; when it finishes, a confirmation reports "
             "how many water-bridge paths were found and where the files were saved. Click <b>Next: Clustering</b> "
             "to continue: the results file is already filled in on the next step."),
@@ -415,6 +425,9 @@ def story():
                   "at <i>auto</i> (or a selection of rigid atoms) and repeat step 1. Also check how many frames contain "
                   "bridges at all: a channel must appear in at least two frames to be kept, so for rare bridges use a "
                   "smaller stride."],
+                 ["The analysis takes too long", "Use the runtime estimate shown before the run: a larger stride or a "
+                  "smaller Max depth (6 is often enough) shortens it most. From the command line, add "
+                  "<font face='Courier'>--estimate</font> to get the estimate without running."],
                  ["Too many clusters to read the picture", "Lower <b>Top clusters</b>, or draw a single cluster with "
                   "<b>Cluster ID</b>."],
                  ["Bridges or protein cut at the box edge", "Image/centre the trajectory before the analysis (for example "

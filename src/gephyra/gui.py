@@ -23,10 +23,12 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import traceback
 
 from . import forms
 from ._version import __version__
+from .estimate import format_duration
 from .visualize import USAGE
 
 try:
@@ -261,6 +263,8 @@ class GephyraApp:
         self.error_records = []
         self.warning_records = []
         self.last_dir = os.getcwd()
+        self.estimate_first = True     # time sample frames before the analysis and ask to confirm
+        self.started_at = time.monotonic()
         self.settings_enabled = settings_enabled
         self.settings = load_settings() if settings_enabled else {}
         self.theme_name = theme or self.settings.get("theme", "dark")
@@ -731,17 +735,25 @@ class GephyraApp:
         kwargs = self.collect(stage)
         if kwargs is None:
             return
+        # The analysis is the slow step: time a few sample frames first and let
+        # the user confirm (see _confirm_estimate).
+        self._launch("estimate" if stage == "calculate" and self.estimate_first else stage, kwargs)
 
+    def _launch(self, stage, kwargs):
         self.current_stage = stage
         self.error_records = []
         self.warning_records = []
         self.cancel_event.clear()
+        self.started_at = time.monotonic()
         self._set_running(True)
         self.progress.configure(mode="indeterminate" if stage == "visualize" else "determinate", value=0)
         if stage == "visualize":
             self.progress.start(15)
-        self.status_var.set(f"Running {STEP_TITLES[stage].lower()}…")
-        self._append_log(f"$ {forms.build_command_line(stage, kwargs)}", logging.INFO, tag="command")
+        if stage == "estimate":
+            self.status_var.set("Estimating the runtime from a few sample frames…")
+        else:
+            self.status_var.set(f"Running {STEP_TITLES[stage].lower()}…")
+            self._append_log(f"$ {forms.build_command_line(stage, kwargs)}", logging.INFO, tag="command")
 
         self.worker = threading.Thread(target=self._work, args=(stage, kwargs), daemon=True)
         self.worker.start()
@@ -792,7 +804,14 @@ class GephyraApp:
             _, done, total = item
             if total and self.current_stage:
                 self.progress.configure(value=done / total)
-                self.status_var.set(f"Running {STEP_TITLES[self.current_stage].lower()}…  {done} / {total}")
+                if self.current_stage == "estimate":
+                    self.status_var.set(f"Estimating the runtime…  sample frame {done} / {total}")
+                    return
+                status = f"Running {STEP_TITLES[self.current_stage].lower()}…  {done} / {total}"
+                if done and done < total:
+                    elapsed = time.monotonic() - self.started_at
+                    status += f"   ·   {format_duration(elapsed / done * (total - done))} left"
+                self.status_var.set(status)
         elif kind == "done":
             self._finish(*item[1:])
 
@@ -800,6 +819,19 @@ class GephyraApp:
         self.progress.stop()
         self._set_running(False)
         self.current_stage = None
+
+        if stage == "estimate":
+            self.progress.configure(value=0)
+            if outcome == "cancelled":
+                self.status_var.set("Cancelled.")
+            elif outcome == "error" or self.error_records:
+                self.status_var.set("Pathway analysis could not start.")
+                self.show_error("Pathway analysis could not start", message or "\n\n".join(self.error_records))
+            elif self._confirm_estimate(result):
+                self._launch("calculate", kwargs)
+            else:
+                self.status_var.set("Analysis not started. Adjust the settings (e.g. a larger stride) and run again.")
+            return
 
         if outcome == "cancelled":
             self.progress.configure(value=0)
@@ -825,6 +857,18 @@ class GephyraApp:
             self._on_empty(stage, kwargs, result, "No recurring channels", warning)
             return
         self._on_success(stage, kwargs, result, warning)
+
+    def _confirm_estimate(self, estimate):
+        """Shows the runtime estimate; True if the user chooses to run the analysis."""
+        for line in [estimate["summary"]] + [f"Tip: {h}" for h in estimate["hints"]]:
+            self._append_log(line, logging.INFO)
+        message = estimate["summary"]
+        if estimate["hints"]:
+            message += "\n\nTo make it faster:\n" + "\n".join(f"•  {h}" for h in estimate["hints"])
+        self.status_var.set(f"Estimated runtime: {format_duration(estimate['estimate_s'])}.")
+        title = f"Estimated runtime: {format_duration(estimate['estimate_s'])}"
+        return self._dialog(title, message, kind="question",
+                            buttons=(("Cancel", None, True), ("Run analysis", None, True))) == "Run analysis"
 
     def _on_empty(self, stage, kwargs, result, title, warning):
         """A step that ran correctly but produced nothing to continue with."""

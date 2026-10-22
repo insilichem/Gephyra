@@ -277,6 +277,9 @@ def run_stage(stage, kwargs, progress_callback=None):
     progress (calculate and cluster). Imports are deferred so that merely
     opening the interface does not load MDAnalysis.
     """
+    if stage == "estimate":
+        from .estimate import estimate_runtime
+        return estimate_runtime(**kwargs, progress_callback=progress_callback)
     if stage == "calculate":
         from .analysis import run_analysis
         return run_analysis(**kwargs, progress_callback=progress_callback)
