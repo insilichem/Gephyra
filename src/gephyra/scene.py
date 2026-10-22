@@ -109,6 +109,76 @@ def minimum_image_chain(positions, box):
     return out
 
 
+# Tried in order when the alignment selection is "auto".
+AUTO_ALIGN_SELECTIONS = ("protein and name CA", "nucleic and name P")
+MAX_FIT_RMSD = 8.0   # above this the superposition is suspicious (e.g. a molecule split by PBC)
+
+
+def resolve_alignment(u, align_sel="auto"):
+    """
+    The selection used to superpose frames, or None for no superposition.
+
+    "auto" picks the first of AUTO_ALIGN_SELECTIONS with at least three atoms
+    (protein C-alpha, then nucleic-acid phosphorus); None, "" or "none"
+    disables it; any other string is used as an MDAnalysis selection.
+    """
+    if align_sel is None or str(align_sel).strip().lower() in ("", "none", "off"):
+        return None
+    sel = str(align_sel).strip()
+    candidates = AUTO_ALIGN_SELECTIONS if sel.lower() == "auto" else (sel,)
+    for candidate in candidates:
+        if len(u.select_atoms(candidate)) >= 3:
+            return candidate
+    if sel.lower() == "auto":
+        return None
+    raise ValueError(f"Alignment selection '{sel}' matches fewer than three atoms.")
+
+
+class FrameAligner:
+    """
+    Superposes frames onto a reference frame using a selection of atoms.
+
+    Molecular dynamics trajectories that are not fitted let the solute drift
+    and tumble through the box, so the same water channel appears at very
+    different absolute coordinates in different frames. Path coordinates are
+    therefore expressed in the frame of reference of `reference_frame`,
+    superposing `selection` (by default the protein C-alpha atoms).
+    """
+
+    def __init__(self, u, selection, reference_frame):
+        from MDAnalysis.analysis import align  # noqa: F401  (imported here to keep start-up light)
+        self.u = u
+        self.selection = selection
+        self.reference_frame = int(reference_frame)
+        self.atoms = u.select_atoms(selection)
+        current = u.trajectory.ts.frame
+        u.trajectory[self.reference_frame]
+        self.ref = self.atoms.positions.astype(np.float64)
+        self.ref_centre = self.ref.mean(axis=0)
+        u.trajectory[current]
+        self._warned = False
+
+    def current_transform(self):
+        """(R, mobile_centre, rmsd) superposing the current frame onto the reference."""
+        from MDAnalysis.analysis.align import rotation_matrix
+        mobile = self.atoms.positions.astype(np.float64)
+        centre = mobile.mean(axis=0)
+        R, rmsd = rotation_matrix(mobile - centre, self.ref - self.ref_centre)
+        if rmsd > MAX_FIT_RMSD and not self._warned:
+            self._warned = True
+            logger.warning(f"Superposition on '{self.selection}' has RMSD {rmsd:.1f} A in frame "
+                           f"{self.u.trajectory.ts.frame}. If the molecule is split across the periodic "
+                           "boundary, image the trajectory first (e.g. cpptraj autoimage).")
+        return np.asarray(R), centre, rmsd
+
+    def apply(self, coords, transform):
+        R, centre, _ = transform
+        return (np.asarray(coords, dtype=np.float64) - centre) @ R.T + self.ref_centre
+
+    def describe(self):
+        return {"selection": self.selection, "reference_frame": self.reference_frame}
+
+
 def load_universe(topo_file, traj_file=None):
     import MDAnalysis as mda
     for label, path in (("Topology", topo_file), ("Trajectory", traj_file)):
@@ -119,7 +189,7 @@ def load_universe(topo_file, traj_file=None):
     return mda.Universe(topo_file, traj_file) if traj_file else mda.Universe(topo_file)
 
 
-def write_snapshot(u, frame, out_pdb, root_sel, water_sel, paths=(), context_sel=None):
+def write_snapshot(u, frame, out_pdb, root_sel, water_sel, paths=(), context_sel=None, alignment=None):
     """
     Writes the snapshot PDB for `frame` and returns a Scene.
 
@@ -132,11 +202,15 @@ def write_snapshot(u, frame, out_pdb, root_sel, water_sel, paths=(), context_sel
             water residues are added to the snapshot and their consecutive
             pairs become `bridges`.
         context_sel: solute selection; defaults to default_context_selection.
+        alignment: the {"selection", "reference_frame"} recorded by `calculate`;
+            the snapshot is then superposed in the same way as the stored
+            path coordinates, so cluster medoids and density overlays line up.
     """
     import MDAnalysis as mda
 
     if frame < 0 or frame >= len(u.trajectory):
         raise ValueError(f"Frame {frame} is outside the trajectory (0-{len(u.trajectory) - 1}).")
+    aligner = FrameAligner(u, alignment["selection"], alignment["reference_frame"]) if alignment else None
     u.trajectory[frame]
     box = u.dimensions
 
@@ -176,9 +250,11 @@ def write_snapshot(u, frame, out_pdb, root_sel, water_sel, paths=(), context_sel
     offset = len(solute)
     for i, atom in enumerate(water_res_atoms, start=offset):
         positions[i] += shifts[atom.resindex]
+    if aligner is not None:
+        positions = aligner.apply(positions, aligner.current_transform())
     snap.atoms.positions = positions
-    if box is not None:
-        snap.dimensions = box
+    if box is not None and aligner is None:
+        snap.dimensions = box   # a rotated box would be misleading, so it is left out when superposed
 
     # Chain IDs let every viewer address the parts with a simple spec: the
     # root residue and the bridging waters get chains of their own (letters not

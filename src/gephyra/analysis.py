@@ -401,7 +401,7 @@ def sanitize_csv_field(field_value):
 def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resname WAT or resname HOH",
                  stride=1, max_depth=10, min_depth=1, prob_threshold=None, cooperativity=0.92, coarse_cutoff=4.5,
                  output_file="results.jsonl", csv_file=None, cluster=False, cluster_threshold=6.0,
-                 cluster_output="clustered_pathways.json", progress_callback=None):
+                 cluster_output="clustered_pathways.json", progress_callback=None, align_sel="auto"):
     """
     Iterates over the trajectory and aggregates network pathways.
     Streams output as JSON Lines (JSONL) to prevent memory exhaustion,
@@ -409,6 +409,11 @@ def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resna
 
     Args:
         prob_threshold: deprecated and ignored; see traverse_network.
+        align_sel: atoms used to superpose every frame onto the first analysed
+            one before path coordinates are stored, so that the same channel
+            has the same coordinates in every frame even when the solute
+            drifts or rotates in an unfitted trajectory. "auto" (default) uses
+            the protein C-alpha atoms (or nucleic-acid P); None disables it.
         cluster: deprecated. Runs cluster_pathways inline once the trajectory
             has been processed. Prefer the dedicated 'cluster' sub-command,
             which can be re-run with different thresholds without repeating the
@@ -467,6 +472,14 @@ def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resna
             "Check the solvent residue names in your topology (see --water)."
         )
 
+    from .scene import FrameAligner, resolve_alignment
+    alignment_sel = resolve_alignment(u, align_sel)
+    aligner = FrameAligner(u, alignment_sel, frames_to_process[0]) if alignment_sel and total_processed else None
+    if aligner is not None:
+        logger.info(f"Superposing frames on '{alignment_sel}' (reference: frame {frames_to_process[0]}).")
+    else:
+        logger.info("Frames are not superposed: path coordinates are stored as in the trajectory.")
+
     path_frequency = {}
 
     with contextlib.ExitStack() as stack:
@@ -483,7 +496,7 @@ def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resna
             root_sel=root_sel, water_sel=water_sel, stride=stride, max_depth=max_depth,
             min_depth=min_depth, prob_threshold=prob_threshold, cooperativity=cooperativity,
             coarse_cutoff=coarse_cutoff, total_processed=total_processed,
-            progress_callback=progress_callback,
+            progress_callback=progress_callback, aligner=aligner,
         )
 
     if csv_file:
@@ -534,7 +547,7 @@ def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resna
 def _process_trajectory(u, water_atoms, root_atoms, out_f, csv_writer, path_frequency, *,
                         root_sel, water_sel, stride, max_depth, min_depth, prob_threshold,
                         cooperativity, coarse_cutoff, total_processed, progress_callback=None,
-                        topo_file=None, traj_file=None):
+                        topo_file=None, traj_file=None, aligner=None):
     """
     Frame loop of run_analysis: writes the metadata line, one line per frame
     and the trailing path_statistics line to `out_f`.
@@ -558,6 +571,8 @@ def _process_trajectory(u, water_atoms, root_atoms, out_f, csv_writer, path_freq
         # molecular context (protein, ligand, waters) without asking again.
         "topo_file": topo_file,
         "traj_file": traj_file,
+        # How path coordinates were superposed (None: raw trajectory frame).
+        "alignment": aligner.describe() if aligner is not None else None,
         "parameters": {
             "root_sel": root_sel,
             "water_sel": water_sel,
@@ -574,6 +589,7 @@ def _process_trajectory(u, water_atoms, root_atoms, out_f, csv_writer, path_freq
     for ts in u.trajectory[::stride]:
         frame_idx = ts.frame
         logger.info(f"Analyzing frame {frame_idx}...")
+        transform = aligner.current_transform() if aligner is not None else None
 
         # 1. Build coarse graph
         g, root_indices = build_graph(u, water_atoms, root_atoms, max_distance=coarse_cutoff, max_depth=max_depth)
@@ -605,8 +621,13 @@ def _process_trajectory(u, water_atoms, root_atoms, out_f, csv_writer, path_freq
 
             # Each atom is placed in the periodic image nearest to the previous
             # one, starting from the root, so stored paths are never torn
-            # across the box (clustering and drawing both use these).
-            coords = minimum_image_chain(u.atoms[list(path_indices)].positions, ts.dimensions).tolist()
+            # across the box; the path is then superposed onto the reference
+            # frame, so the same channel has the same coordinates in every
+            # frame (clustering and drawing both rely on this).
+            coords = minimum_image_chain(u.atoms[list(path_indices)].positions, ts.dimensions)
+            if transform is not None:
+                coords = aligner.apply(coords, transform)
+            coords = coords.tolist()
             distances = [g[a][b]['dist'] for a, b in zip(path_indices[:-1], path_indices[1:])]
 
             avg_oo = float(np.mean(distances)) if distances else 0.0

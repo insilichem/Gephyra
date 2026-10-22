@@ -228,3 +228,120 @@ class TestViewersOpenScenes(TestPipelineScenes):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _rotation(axis, angle):
+    axis = np.asarray(axis, float) / np.linalg.norm(axis)
+    K = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
+    return np.eye(3) + np.sin(angle) * K + (1 - np.cos(angle)) * K @ K
+
+
+def make_tumbling_system(directory, n_frames=4):
+    """
+    A ligand oxygen with a three-water channel, in a system that is rotated
+    and translated rigidly in every frame, like an unfitted trajectory. Two
+    sets of waters take turns occupying the channel (even frames: set A,
+    odd frames: set B, the other set waits far away), so only geometry - not
+    atom identity - can tell that it is the same channel. Returns
+    (topology, trajectory) paths.
+    """
+    from MDAnalysis.coordinates.memory import MemoryReader
+    # A rigid carbon scaffold (resname SCF) plays the part of the protein C-alpha atoms.
+    names = ["O1"] + ["O", "H1", "H2"] * 6 + ["CA"] * 4
+    resindex = [0] + [1 + i // 3 for i in range(18)] + [7] * 4
+    u = mda.Universe.empty(len(names), n_residues=8, atom_resindex=resindex, trajectory=True)
+    u.add_TopologyAttr("name", names)
+    u.add_TopologyAttr("resname", ["LIG"] + ["WAT"] * 6 + ["SCF"])
+    u.add_TopologyAttr("resid", list(range(1, 9)))
+    u.add_TopologyAttr("elements", ["O"] + ["O", "H", "H"] * 6 + ["C"] * 4)
+    u.add_TopologyAttr("masses", [16.0] + [16.0, 1.008, 1.008] * 6 + [12.0] * 4)
+    channel = []
+    for x in (2.8, 5.6, 8.4):
+        channel += [[x, 0.0, 0.0], [x + 0.6, 0.8, 0.0], [x + 0.6, -0.8, 0.0]]
+    channel = np.array(channel)
+    parked = channel + np.array([0.0, 20.0, 0.0])
+    frames = []
+    for f in range(n_frames):
+        set_a, set_b = (channel, parked) if f % 2 == 0 else (parked, channel)
+        scaffold = np.array([[-6.0, 0.0, 0.0], [-6.0, 4.0, 0.0], [-6.0, 0.0, 4.0], [-9.0, 1.0, 1.0]])
+        system = np.vstack([[[0.0, 0.0, 0.0]], set_a, set_b, scaffold])
+        R = _rotation([1, 2, 3], 0.7 * f)
+        frames.append(system @ R.T + np.array([50.0, 50.0, 50.0]) + np.array([6.0, -4.0, 3.0]) * f)
+    u.load_new(np.array(frames, dtype=np.float32), format=MemoryReader)
+    for ts in u.trajectory:
+        ts.dimensions = [100.0, 100.0, 100.0, 90.0, 90.0, 90.0]
+    topo, traj = os.path.join(directory, "tumble.pdb"), os.path.join(directory, "tumble.dcd")
+    u.trajectory[0]
+    u.atoms.write(topo)
+    with mda.Writer(traj, len(u.atoms)) as w:
+        for _ in u.trajectory:
+            w.write(u.atoms)
+    return topo, traj
+
+
+class TestAlignment(unittest.TestCase):
+    """Unfitted trajectories: the same channel must be compared in a common frame."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.topo, self.traj = make_tumbling_system(self.tmp)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def p(self, *parts):
+        return os.path.join(self.tmp, *parts)
+
+    def _paths(self, align):
+        out = self.p(f"r_{align}.jsonl")
+        run_analysis(self.topo, self.traj, "resname LIG", water_sel="resname WAT", max_depth=3,
+                     output_file=out, align_sel=align)
+        lines = [json.loads(l) for l in open(out)]
+        return out, lines[0], [l for l in lines if l["type"] == "frame"]
+
+    def test_resolve_alignment(self):
+        from gephyra.scene import resolve_alignment
+        u = mda.Universe(self.topo)
+        self.assertIsNone(resolve_alignment(u, "auto"))          # no protein, no nucleic acid
+        self.assertIsNone(resolve_alignment(u, None))
+        self.assertIsNone(resolve_alignment(u, "none"))
+        self.assertEqual(resolve_alignment(u, "all"), "all")
+        with self.assertRaises(ValueError):
+            resolve_alignment(u, "resname LIG")                   # a single atom cannot define a frame
+
+    def test_superposed_paths_coincide_across_frames(self):
+        out, meta, frames = self._paths("resname SCF")
+        self.assertEqual(meta["alignment"], {"selection": "resname SCF", "reference_frame": 0})
+        # Different water molecules, same place once superposed.
+        longest = [max(f["paths"], key=lambda p: p["length"]) for f in frames]
+        self.assertNotEqual(longest[0]["nodes"], longest[1]["nodes"])
+        reference = np.array(longest[0]["coords"])
+        for path in longest[1:]:
+            np.testing.assert_allclose(path["coords"], reference, atol=0.05)
+
+    def test_without_superposition_paths_move_and_do_not_cluster(self):
+        out, meta, frames = self._paths(None)
+        self.assertIsNone(meta["alignment"])
+        first = [f["paths"][0]["coords"][0] for f in frames]
+        self.assertGreater(np.linalg.norm(np.subtract(first[-1], first[0])), 10.0)
+        cluster_pathways(out, threshold=3.0, output_file=self.p("c_raw.json"))
+        occupancies = [c["occupancy"] for c in load_clusters(self.p("c_raw.json"))[0]]
+        self.assertLess(max(occupancies, default=0.0), 1.0)   # the channel is never seen in all frames
+
+    def test_superposition_lets_the_channel_cluster(self):
+        out, _, _ = self._paths("resname SCF")
+        cluster_pathways(out, threshold=3.0, output_file=self.p("c.json"))
+        clusters, meta = load_clusters(self.p("c.json"))
+        self.assertTrue(clusters)
+        self.assertAlmostEqual(clusters[0]["occupancy"], 1.0)
+        self.assertEqual(meta["alignment"]["selection"], "resname SCF")
+
+    def test_snapshot_is_superposed_like_the_paths(self):
+        out, meta, frames = self._paths("resname SCF")
+        structure = resolve_structure(out)
+        self.assertEqual(structure["alignment"], meta["alignment"])
+        scene = write_snapshot(mda.Universe(self.topo, self.traj), 3, self.p("snap.pdb"), "resname LIG", "resname WAT",
+                               paths=[frames[3]["paths"][-1]["nodes"]], context_sel="resname LIG",
+                               alignment=meta["alignment"])
+        root = mda.Universe(scene.pdb_path).select_atoms(f"chainID {scene.root_chain}").positions[0]
+        np.testing.assert_allclose(root, frames[0]["paths"][0]["coords"][0], atol=0.05)

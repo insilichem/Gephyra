@@ -30,7 +30,7 @@ DEFAULTS = {
     "calculate": {
         "topo": "", "traj": "", "root": "", "water": DEFAULT_WATER,
         "stride": "1", "max_depth": "10", "min_depth": "1",
-        "cooperativity": "0.92", "coarse_cutoff": "4.5",
+        "cooperativity": "0.92", "coarse_cutoff": "4.5", "align": "auto",
         "output": "results.jsonl", "csv": "",
     },
     "cluster": {
@@ -131,6 +131,11 @@ def _output_path(values, field, label, outdir):
     return path
 
 
+def _alignment(values):
+    text = _text(values, "align")
+    return None if text.lower() in ("", "none", "off") else text
+
+
 def parse_calculate(values, outdir=""):
     """Form strings -> keyword arguments for analysis.run_analysis."""
     kwargs = {
@@ -143,6 +148,8 @@ def parse_calculate(values, outdir=""):
         "min_depth": _int(values, "min_depth", "Min depth", minimum=1),
         "cooperativity": _float(values, "cooperativity", "Cooperativity", maximum=1.0),
         "coarse_cutoff": _float(values, "coarse_cutoff", "Coarse cutoff"),
+        # "auto" (protein C-alpha), a selection, or empty/"none" to keep raw coordinates.
+        "align_sel": _alignment(values),
         "output_file": _output_path(values, "output", "Output JSONL", outdir),
         "csv_file": None,
     }
@@ -233,7 +240,8 @@ _CLI_FLAGS = {
     "calculate": [("topo_file", "--topo"), ("traj_file", "--traj"), ("root_sel", "--root"),
                   ("water_sel", "--water"), ("stride", "--stride"), ("max_depth", "--max_depth"),
                   ("min_depth", "--min_depth"), ("cooperativity", "--cooperativity"),
-                  ("coarse_cutoff", "--coarse_cutoff"), ("output_file", "--output"), ("csv_file", "--csv")],
+                  ("coarse_cutoff", "--coarse_cutoff"), ("align_sel", "--align"), ("output_file", "--output"),
+                  ("csv_file", "--csv")],
     "cluster": [("data_file", "--data"), ("threshold", "--threshold"), ("coarse_threshold", "--coarse_threshold"),
                 ("coarse_trigger", "--coarse_trigger"), ("max_paths", "--max_paths"), ("output_file", "--output")],
     "visualize": [("data_file", "--data"), ("format", "--format"), ("mode", "--mode"), ("frame_idx", "--frame"),
@@ -252,6 +260,8 @@ def build_command_line(stage, kwargs):
         if value is None or value == "":
             continue
         parts += [flag, str(value)]
+    if stage == "calculate" and "align_sel" in kwargs and kwargs["align_sel"] is None:
+        parts.append("--no_align")
     if stage == "visualize" and kwargs.get("with_structure") is False:
         parts.append("--no_structure")
     return " ".join(shlex.quote(p) for p in parts)

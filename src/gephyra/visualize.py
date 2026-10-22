@@ -278,7 +278,8 @@ def _snapshot(structure, frame, snapshot_path, paths):
     from .scene import load_universe, write_snapshot
     u = load_universe(structure["topo_file"], structure.get("traj_file"))
     return write_snapshot(u, frame, snapshot_path, structure["root_sel"], structure["water_sel"],
-                          paths=paths, context_sel=structure.get("context_sel"))
+                          paths=paths, context_sel=structure.get("context_sel"),
+                          alignment=structure.get("alignment"))
 
 
 def _header(comment, plan, fmt, output_file):
@@ -668,7 +669,8 @@ def resolve_structure(data_file, topo_file=None, traj_file=None, context_sel=Non
         logger.warning("The root/water selections used by 'calculate' are unknown for this file; "
                        "writing geometry only.")
         return None
-    return {"topo_file": topo, "traj_file": traj, "root_sel": root, "water_sel": water, "context_sel": context_sel}
+    return {"topo_file": topo, "traj_file": traj, "root_sel": root, "water_sel": water, "context_sel": context_sel,
+            "alignment": info.get("alignment")}
 
 
 def run_visualization(data_file, format="vmd", mode="density", frame_idx=None, cluster_id=None, output_file="pathways_viz",

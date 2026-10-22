@@ -297,6 +297,10 @@ def story():
                  ["Max depth / Min depth", "Longest and shortest chains (number of waters) that are kept.", "10 / 1"],
                  ["Cooperativity", "Per-step discount along a chain, between 0 and 1 (1 switches it off).", "0.92"],
                  ["Coarse cutoff", "Neighbour search radius in angstrom.", "4.5"],
+                 ["Superpose on", "Atoms used to superpose every frame on the first one, so that the same water channel "
+                  "has the same coordinates in every frame even if the protein drifts or rotates in the box. "
+                  "<i>auto</i> uses the protein C-alpha atoms; <i>none</i> keeps the trajectory coordinates "
+                  "(only for trajectories that are already fitted).", "auto"],
                  ["Results file", "Name of the frame-by-frame results file in the output folder.", "results.jsonl"],
                  ["CSV summary", "Optional table of all paths, for spreadsheets.", "-"]],
                 [3.4 * cm, 10.1 * cm, 3.0 * cm]),
@@ -405,6 +409,10 @@ def story():
                  ["The data file does not record its structure", "The file comes from an older version of Gephyra. Fill in "
                   "Topology and Trajectory in the Molecular scene section."],
                  ["VMD: Unable to determine file type", "Open the script with <font face='Courier'>vmd -e scene.tcl</font>."],
+                 ["Clustering finds no channels", "Check that the trajectory frames are superposed: keep <b>Superpose on</b> "
+                  "at <i>auto</i> (or a selection of rigid atoms) and repeat step 1. Also check how many frames contain "
+                  "bridges at all: a channel must appear in at least two frames to be kept, so for rare bridges use a "
+                  "smaller stride."],
                  ["Too many clusters to read the picture", "Lower <b>Top clusters</b>, or draw a single cluster with "
                   "<b>Cluster ID</b>."],
                  ["Bridges or protein cut at the box edge", "Image/centre the trajectory before the analysis (for example "

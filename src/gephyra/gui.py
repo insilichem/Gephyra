@@ -98,6 +98,9 @@ SECTIONS = {
             ("min_depth", "Min depth", "text", None, "Shorter paths are not written (1 <= min depth <= max depth)."),
             ("cooperativity", "Cooperativity", "text", None, "Per-depth discount in (0, 1]; 1.0 disables cooperativity."),
             ("coarse_cutoff", "Coarse cutoff (Å)", "text", None, "Neighbour search radius for building the graph (> 0)."),
+            ("align", "Superpose on", "text", None, "Atoms used to superpose every frame on the first one, so the same "
+             "channel has the same coordinates in every frame. 'auto' = protein C-alpha atoms; 'none' = keep the "
+             "trajectory coordinates (only for trajectories that are already fitted)."),
         ]),
         ("Output", [
             ("output", "Results file", "save", JSONL_TYPES, "Frame-by-frame path data (.jsonl), written to the output folder; input for clustering and visualization."),
