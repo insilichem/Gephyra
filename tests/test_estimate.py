@@ -113,7 +113,7 @@ class TestEstimate(unittest.TestCase):
 
     def test_run_logs_time_left(self):
         with self.assertLogs("gephyra.analysis", level="INFO") as logs:
-            run_analysis(self.topo, self.traj, "resname LIG", water_sel="resname WAT", max_depth=3,
+            run_analysis(self.topo, self.traj, "resname LIG", water_sel="resname WAT", max_depth=3, min_depth=1,
                          output_file=os.path.join(self.tmp, "r.jsonl"))
         text = "\n".join(logs.output)
         self.assertIn("(1/6)", text)

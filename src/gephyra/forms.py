@@ -29,7 +29,7 @@ DEFAULT_WATER = "resname SOL or resname WAT or resname HOH"
 DEFAULTS = {
     "calculate": {
         "topo": "", "traj": "", "root": "", "water": DEFAULT_WATER,
-        "stride": "1", "max_depth": "10", "min_depth": "1",
+        "stride": "1", "max_depth": "10", "min_depth": "3",
         "cooperativity": "0.92", "coarse_cutoff": "4.5", "align": "auto",
         "output": "results.jsonl", "csv": "",
     },

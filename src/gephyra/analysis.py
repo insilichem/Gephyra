@@ -56,12 +56,19 @@ def _no_channel_warning(source_metadata, threshold):
             + "; ".join(hints) + ".")
 
 
-def coverage_warning(n_frames_with_paths, n_analysed, stride=1, n_trajectory_frames=None):
+def coverage_warning(n_frames_with_paths, n_analysed, stride=1, n_trajectory_frames=None,
+                     n_discarded=0, min_depth=None):
     """
     Explanation (with what to try) when an analysis found no water bridges, or
     found them in too few frames for clustering; None when coverage is fine.
     """
     n_total = n_trajectory_frames or n_analysed
+    if n_frames_with_paths == 0 and n_discarded:
+        # Chains were found, only shorter than Min depth: say so, rather than
+        # implying that the root has no hydrogen-bonded water at all.
+        return (f"No water bridges of at least {min_depth} waters were found in the {n_analysed} analysed frames. "
+                f"{n_discarded} shorter chains were found and discarded by Min depth ({min_depth}). "
+                "Lower Min depth to keep them, or raise Max depth if longer chains are expected.")
     stride_hint = ""
     if stride and stride > 1:
         stride_hint = (f" Only {n_analysed} of {n_total} trajectory frames were analysed (stride {stride}); "
@@ -412,7 +419,7 @@ def cluster_pathways(data_file, threshold=6.0, coarse_threshold=None, coarse_tri
     return result
 
 
-def validate_calculation_parameters(stride=1, max_depth=10, min_depth=1, cooperativity=0.92, coarse_cutoff=4.5):
+def validate_calculation_parameters(stride=1, max_depth=10, min_depth=3, cooperativity=0.92, coarse_cutoff=4.5):
     """
     Raises ValueError with an actionable message for out-of-range parameters,
     before any trajectory is loaded.
@@ -442,7 +449,7 @@ def sanitize_csv_field(field_value):
     return field_str
 
 def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resname WAT or resname HOH",
-                 stride=1, max_depth=10, min_depth=1, prob_threshold=None, cooperativity=0.92, coarse_cutoff=4.5,
+                 stride=1, max_depth=10, min_depth=3, prob_threshold=None, cooperativity=0.92, coarse_cutoff=4.5,
                  output_file="results.jsonl", csv_file=None, cluster=False, cluster_threshold=6.0,
                  cluster_output="clustered_pathways.json", progress_callback=None, align_sel="auto"):
     """
@@ -565,7 +572,8 @@ def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resna
     logger.info(f"Results saved to {output_file}")
 
     frames_with_paths = sorted(set().union(*path_frequency.values())) if path_frequency else []
-    warning = coverage_warning(len(frames_with_paths), total_processed, stride, n_frames)
+    warning = coverage_warning(len(frames_with_paths), total_processed, stride, n_frames,
+                               n_discarded=total_discarded, min_depth=min_depth)
     if warning:
         logger.warning(warning)
 

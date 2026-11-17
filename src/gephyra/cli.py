@@ -62,7 +62,9 @@ def build_parser():
     calc_parser.add_argument("--water", default="resname SOL or resname WAT or resname HOH", help="MDAnalysis selection string for water.")
     calc_parser.add_argument("--stride", type=_positive_int, default=1, help="Frame stride for trajectory processing.")
     calc_parser.add_argument("--max_depth", type=_positive_int, default=10, help="Maximum number of consecutive waters in a path.")
-    calc_parser.add_argument("--min_depth", type=_positive_int, default=1, help="Minimum number of consecutive waters in a path to save in results.")
+    calc_parser.add_argument("--min_depth", type=_positive_int, default=3,
+        help="Minimum number of consecutive waters in a path to save in results. Default 3: a single water "
+             "hydrogen-bonded to the root is a hydration contact, not a water bridge.")
     calc_parser.add_argument("--cooperativity", type=_cooperativity, default=0.92, help="Depth-dependent cooperativity factor for hydrogen bonds, in (0, 1]. 1.0 disables the effect.")
     calc_parser.add_argument("--align", default="auto",
         help="MDAnalysis selection used to superpose every frame onto the first analysed one before "
@@ -174,7 +176,8 @@ def _dispatch(args):
     if args.command == "calculate" and args.estimate:
         from .estimate import estimate_runtime
         result = estimate_runtime(topo_file=args.topo, traj_file=args.traj, root_sel=args.root, water_sel=args.water,
-                                  stride=args.stride, max_depth=args.max_depth, coarse_cutoff=args.coarse_cutoff,
+                                  stride=args.stride, max_depth=args.max_depth, min_depth=args.min_depth,
+                                  coarse_cutoff=args.coarse_cutoff,
                                   cooperativity=args.cooperativity)
         print(result["summary"])
         for hint in result["hints"]:

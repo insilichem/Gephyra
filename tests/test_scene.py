@@ -105,7 +105,7 @@ class TestPipelineScenes(_Tmp):
     def setUp(self):
         super().setUp()
         self.jsonl = self.p("r.jsonl")
-        run_analysis(self.pdb, self.pdb, "resname LIG", water_sel="resname WAT", max_depth=3,
+        run_analysis(self.pdb, self.pdb, "resname LIG", water_sel="resname WAT", max_depth=3, min_depth=1,
                      output_file=self.jsonl)
         # Two frames so a cluster survives the >= 2 frames rule.
         lines = open(self.jsonl).read().splitlines()
@@ -294,7 +294,7 @@ class TestAlignment(unittest.TestCase):
 
     def _paths(self, align):
         out = self.p(f"r_{align}.jsonl")
-        run_analysis(self.topo, self.traj, "resname LIG", water_sel="resname WAT", max_depth=3,
+        run_analysis(self.topo, self.traj, "resname LIG", water_sel="resname WAT", max_depth=3, min_depth=1,
                      output_file=out, align_sel=align)
         lines = [json.loads(l) for l in open(out)]
         return out, lines[0], [l for l in lines if l["type"] == "frame"]

@@ -294,7 +294,9 @@ def story():
                   "<font face='Courier'>resname LIG and name O4</font>.", "required"],
                  ["Water selection", "MDAnalysis selection of the bridging solvent.", "SOL, WAT or HOH"],
                  ["Stride", "Analyse every N-th frame. Larger values are faster.", "1"],
-                 ["Max depth / Min depth", "Longest and shortest chains (number of waters) that are kept.", "10 / 1"],
+                 ["Max depth / Min depth", "Longest and shortest chains (number of waters) that are kept. A single water next "
+                  "to the root is a hydration contact, not a bridge, so by default chains need at least three waters.",
+                  "10 / 3"],
                  ["Cooperativity", "Per-step discount along a chain, between 0 and 1 (1 switches it off).", "0.92"],
                  ["Coarse cutoff", "Neighbour search radius in angstrom.", "4.5"],
                  ["Superpose on", "Atoms used to superpose every frame on the first one, so that the same water channel "
