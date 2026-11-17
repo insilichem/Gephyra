@@ -168,7 +168,7 @@ class TestRunAnalysisEndToEnd(unittest.TestCase):
     def test_outputs_use_hquality_names(self):
         import csv
         csv_out = os.path.join(self.tmp, "r.csv")
-        self._run(max_depth=3, csv_file=csv_out)
+        self._run(min_depth=1, max_depth=3, csv_file=csv_out)
         with open(self.out) as f:
             objs = [json.loads(line) for line in f if line.strip()]
         paths = [p for o in objs if o["type"] == "frame" for p in o["paths"]]
@@ -377,3 +377,50 @@ class TestEmptyResultMessages(unittest.TestCase):
                 self.assertIsNone(run_visualization(self.p("e.jsonl"), format="pymol", mode=mode,
                                                     output_file=self.p("v"), with_structure=False))
             self.assertIn("No water bridges were found in any of the 2 frames", "\n".join(logs.output))
+
+
+class TestMinDepthDefault(unittest.TestCase):
+    """A single water next to the root is a hydration contact, not a water bridge."""
+
+    def test_default_is_three_everywhere(self):
+        import inspect
+        from gephyra import forms
+        from gephyra.cli import build_parser
+        from gephyra.estimate import estimate_runtime
+        self.assertEqual(inspect.signature(run_analysis).parameters["min_depth"].default, 3)
+        self.assertEqual(inspect.signature(estimate_runtime).parameters["min_depth"].default, 3)
+        self.assertEqual(inspect.signature(validate_calculation_parameters).parameters["min_depth"].default, 3)
+        args = build_parser().parse_args(["calculate", "--topo", "t", "--traj", "x", "--root", "r"])
+        self.assertEqual(args.min_depth, 3)
+        self.assertEqual(forms.DEFAULTS["calculate"]["min_depth"], "3")
+
+    def test_shorter_values_are_still_accepted(self):
+        validate_calculation_parameters(min_depth=1, max_depth=10)
+        with self.assertRaises(ValueError):
+            validate_calculation_parameters(min_depth=3, max_depth=2)
+
+    def test_warning_when_only_short_chains_exist(self):
+        from gephyra.analysis import coverage_warning
+        message = coverage_warning(0, 20, n_discarded=37, min_depth=3)
+        self.assertIn("No water bridges of at least 3 waters", message)
+        self.assertIn("37 shorter chains were found and discarded by Min depth (3)", message)
+        self.assertIn("Lower Min depth", message)
+        # Nothing at all found: the original explanation.
+        self.assertIn("No water bridges were found in any", coverage_warning(0, 20, n_discarded=0, min_depth=3))
+
+    def test_analysis_with_short_chains_only_reports_min_depth(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        u = mda.Universe.empty(3, trajectory=True, n_residues=3, atom_resindex=[0, 1, 2])
+        u.add_TopologyAttr('resname', ['LIG', 'SOL', 'SOL'])
+        u.add_TopologyAttr('name', ['O1', 'OW', 'OW'])
+        u.add_TopologyAttr('resid', [1, 2, 3])
+        u.atoms.positions = np.array([[0.0, 0, 0], [2.8, 0, 0], [5.6, 0, 0]])   # chains of 1 and 2 waters
+        u.dimensions = np.array([50.0, 50.0, 50.0, 90.0, 90.0, 90.0])
+        pdb = os.path.join(tmp, "short.pdb")
+        u.atoms.write(pdb)
+        with self.assertLogs("gephyra.analysis", level="WARNING"):
+            summary = run_analysis(pdb, pdb, "resname LIG", water_sel="resname SOL",
+                                   output_file=os.path.join(tmp, "r.jsonl"))
+        self.assertEqual(summary["n_paths"], 0)
+        self.assertIn("discarded by Min depth (3)", summary["warning"])

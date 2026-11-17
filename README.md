@@ -220,7 +220,7 @@ gephyra calculate \
 | `--water` | `"resname SOL or resname WAT or resname HOH"` | Solvent selection string. |
 | `--stride` | `1` | Process every Nth frame. A warning is issued when `stride=1` and the trajectory exceeds 1000 frames. |
 | `--max_depth` | `10` | Maximum number of sequential water molecules in a path. |
-| `--min_depth` | `1` | Minimum number of sequential water molecules in a path; shorter paths are discarded from output. |
+| `--min_depth` | `3` | Minimum number of sequential water molecules in a path; shorter paths are discarded from output. A single water hydrogen-bonded to the root is a hydration contact rather than a water bridge, hence the default of 3. Values of 1 or 2 are still accepted. |
 | `--cooperativity` | `0.92` | Geometric discount applied to successive hydrogen bonds along a chain: the *k*-th bond contributes its weight scaled by `cooperativity^(k-1)`. This models the polarisation that propagates along a water wire, which makes a bond embedded in a chain stronger than the same geometry in isolation. Values below 1.0 favour longer chains; `1.0` disables the effect and recovers the plain product of edge probabilities. |
 | `--coarse_cutoff` | `4.5` | Distance cutoff in Å for initial neighbour graph construction. |
 | `--align` | `auto` | Atoms used to superpose every frame onto the first analysed frame before path coordinates are stored (`auto`: protein Cα, or nucleic-acid P). This puts the same channel at the same coordinates in every frame even when the solute drifts or rotates through the box, which clustering needs. The choice is recorded in the output and reused by `visualize`. |

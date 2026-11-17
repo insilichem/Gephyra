@@ -97,7 +97,8 @@ SECTIONS = {
         ("Parameters", [
             ("stride", "Stride", "text", None, "Analyse every Nth frame (integer >= 1)."),
             ("max_depth", "Max depth", "text", None, "Maximum number of consecutive waters in a path (integer >= 1)."),
-            ("min_depth", "Min depth", "text", None, "Shorter paths are not written (1 <= min depth <= max depth)."),
+            ("min_depth", "Min depth", "text", None, "Paths with fewer waters are not written. Default 3: a single water next to the root is a hydration "
+             "contact, not a bridge (1 <= min depth <= max depth)."),
             ("cooperativity", "Cooperativity", "text", None, "Per-depth discount in (0, 1]; 1.0 disables cooperativity."),
             ("coarse_cutoff", "Coarse cutoff (Å)", "text", None, "Neighbour search radius for building the graph (> 0)."),
             ("align", "Superpose on", "text", None, "Atoms used to superpose every frame on the first one, so the same "

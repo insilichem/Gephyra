@@ -48,7 +48,7 @@ def _sample_frames(frames, n_samples):
 
 
 def estimate_runtime(topo_file, traj_file, root_sel, water_sel="resname SOL or resname WAT or resname HOH",
-                     stride=1, max_depth=10, coarse_cutoff=4.5, cooperativity=0.92, n_samples=3,
+                     stride=1, max_depth=10, min_depth=3, coarse_cutoff=4.5, cooperativity=0.92, n_samples=3,
                      progress_callback=None, **_ignored):
     """
     Estimated duration of `run_analysis` with these settings.
@@ -66,8 +66,8 @@ def estimate_runtime(topo_file, traj_file, root_sel, water_sel="resname SOL or r
     import MDAnalysis as mda
     from .analysis import validate_calculation_parameters
 
-    validate_calculation_parameters(stride=stride, max_depth=max_depth, cooperativity=cooperativity,
-                                    coarse_cutoff=coarse_cutoff)
+    validate_calculation_parameters(stride=stride, max_depth=max_depth, min_depth=min_depth,
+                                    cooperativity=cooperativity, coarse_cutoff=coarse_cutoff)
     if not traj_file:
         raise ValueError("A trajectory file is required (e.g. .xtc, .dcd, .nc).")
     for label, path in (("Topology", topo_file), ("Trajectory", traj_file)):
