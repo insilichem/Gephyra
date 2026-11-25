@@ -626,6 +626,37 @@ class TestGuiApp(_TmpDir):
         self._wait()
         self.assertTrue(any("left" in s and "/ 10" in s for s in seen), seen)
 
+    def _fill_hydration(self):
+        h = self.app.vars["hydration"]
+        h["topo"].set(self.p("sys.pdb"))
+        h["traj"].set(self.p("traj.dcd"))
+        h["root"].set("resname LIG")
+
+    def test_hydration_is_the_fourth_step(self):
+        self.assertEqual(list(self.app.nav_buttons), ["calculate", "cluster", "visualize", "hydration"])
+        self.app.show_stage("hydration")
+        self.assertEqual(self.app.active_stage, "hydration")
+
+    def test_hydration_success_prefills_visualization(self):
+        self._fill_hydration()
+        self.runner_result = {"n_sites": 5, "n_frames": 100, "top_occupancy": 0.42}
+        self.app.start("hydration")
+        self._wait()
+        title, message, files, folder = self.successes[0]
+        self.assertEqual(title, "Hydration sites found")
+        self.assertIn("5 hydration sites occupied in at least 20% of the 100 analysed frames", message)
+        self.assertIn("filled 42% of the time", message)
+        self.assertEqual(self.app.vars["visualize"]["data"].get(), self.p("hydration_sites.json"))
+        self.assertEqual(self.app.vars["visualize"]["mode"].get(), "sites")
+
+    def test_hydration_without_sites_warns(self):
+        self._fill_hydration()
+        self.runner_result = {"n_sites": 0, "n_frames": 100, "warning": "No spot is occupied in at least 20%."}
+        self.app.start("hydration")
+        self._wait()
+        self.assertEqual(self.successes, [])
+        self.assertEqual(self.warnings[0][0], "No persistent hydration sites")
+
     def test_runtime_exception_becomes_error_dialog(self):
         def boom(_cb):
             raise ValueError("Root selection matched nothing")

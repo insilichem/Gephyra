@@ -126,12 +126,12 @@ SECTIONS = {
     ],
     "visualize": [
         ("Input", [
-            ("data", "Input data", "open", VIS_INPUT_TYPES, "Step-1 .jsonl for density/frame modes; step-2 cluster file for cluster mode."),
+            ("data", "Input data", "open", VIS_INPUT_TYPES, "Step-1 .jsonl for density/frame modes; step-2 cluster file for cluster mode; step-4 hydration-site file for sites mode."),
             ("format", "Viewer", "choice", forms.VISUALIZE_FORMATS, "chimerax writes a .cxc script; chimera/pymol a .py; vmd a .tcl (run with vmd -e)."),
-            ("mode", "Mode", "choice", forms.VISUALIZE_MODES, "cluster: cluster medoids. frame: one frame with its real water molecules. density: every path of every frame."),
+            ("mode", "Mode", "choice", forms.VISUALIZE_MODES, "cluster: cluster medoids. frame: one frame with its real water molecules. density: every path of every frame. sites: hydration sites (step 4)."),
             ("frame", "Frame", "text", None, "Trajectory frame index (frame mode). Empty = the first frame with water bridges."),
             ("cluster_id", "Cluster ID", "text", None, "Cluster mode: draw a single cluster as real molecules at its medoid frame. Empty = several clusters."),
-            ("top_clusters", "Top clusters", "text", None, "Cluster mode: number of most-occupied clusters to draw (empty = all)."),
+            ("top_clusters", "Top clusters / sites", "text", None, "Cluster and sites modes: number of most-occupied clusters or sites to draw (empty = all)."),
         ]),
         ("Molecular scene", [
             ("with_structure", "Include protein, ligand and waters", "check", None, "The script loads a structure snapshot written by Gephyra, so the network is shown in its molecular context."),
@@ -145,21 +145,47 @@ SECTIONS = {
             ("output", "Script name", "save", None, "File name in the output folder; the viewer's extension is added if missing."),
         ]),
     ],
+    "hydration": [
+        ("System", [
+            ("topo", "Topology", "open", TOPOLOGY_TYPES, "Structure/topology of the system."),
+            ("traj", "Trajectory", "open", TRAJECTORY_TYPES, "Required. Trajectory frames to analyse."),
+            ("root", "Root selection", "text", None, "Where the shells start: an atom (e.g. resname LIG and name O1) or a whole residue (e.g. resname LIG)."),
+            ("water", "Water selection", "text", None, "MDAnalysis selection for the solvent."),
+        ]),
+        ("Shells and sites", [
+            ("max_shell", "Max shell", "choice", ("1", "2", "3"), "1 = waters within hydrogen-bond distance of the root; 2 and 3 add the waters hydrogen-bonded to the previous shell."),
+            ("shell_cutoff", "Shell cutoff (Å)", "text", None, "Oxygen-to-heavy-atom distance that defines a shell contact (3.5 Å: hydrogen-bond distance)."),
+            ("stride", "Stride", "text", None, "Analyse every Nth frame."),
+            ("site_radius", "Site radius (Å)", "text", None, "A water occupies a spot when its oxygen is within this distance of it."),
+            ("min_occupancy", "Min occupancy", "text", None, "Report spots occupied in at least this fraction of the frames (0-1). Bulk water gives about 0.13 for 1 Å."),
+            ("align", "Superpose on", "text", None, "'auto' = protein C-alpha atoms, so spots are fixed in the binding site. Use the ligand residue (e.g. resname LIG) if the ligand moves within the pocket and its own hydration is what matters."),
+        ]),
+        ("Output", [
+            ("output", "Sites file", "save", JSON_TYPES, "Hydration sites (.json); input for Visualization in 'sites' mode."),
+            ("csv", "CSV table", "save", CSV_TYPES, "Optional table of the sites: position, occupancy, residence, shell and main contact atom."),
+            ("map", "Density map", "save", [("OpenDX map", "*.dx"), ("All files", "*")], "Optional water-density map (1 = bulk water), drawn as a surface around the sites."),
+            ("pdb", "Sites PDB", "save", [("PDB", "*.pdb"), ("All files", "*")], "Optional PDB of the site centres (occupancy column = occupancy, B-factor = enrichment over bulk)."),
+        ]),
+    ],
 }
 FIELDS = {stage: [f for _, fields in SECTIONS[stage] for f in fields] for stage in SECTIONS}
 # Short fields laid out two per row (consecutive ones are paired).
 HALF_FIELDS = {"stride", "max_depth", "min_depth", "cooperativity", "coarse_cutoff",
                "threshold", "coarse_threshold", "coarse_trigger", "max_paths",
-               "format", "mode", "frame", "cluster_id", "max_bond_draw_dist", "chimerax_model"}
+               "format", "mode", "frame", "cluster_id", "max_bond_draw_dist", "chimerax_model",
+               "max_shell", "shell_cutoff", "site_radius", "min_occupancy"}
 
-STEP_TITLES = {"calculate": "Pathway Analysis", "cluster": "Clustering", "visualize": "Visualization"}
+STEP_TITLES = {"calculate": "Pathway Analysis", "cluster": "Clustering", "visualize": "Visualization",
+               "hydration": "Hydration Sites"}
 TAB_TITLES = {s: f"{i}. {t}" for i, (s, t) in enumerate(STEP_TITLES.items(), start=1)}
 STEP_SUBTITLES = {
     "calculate": "Trace water-bridge chains from the root atoms through the trajectory.",
     "cluster": "Group recurring pathways into spatial channels (Fréchet distance).",
     "visualize": "Write a ready-to-run scene for ChimeraX, Chimera, PyMOL or VMD.",
+    "hydration": "Find where waters around the root sit persistently, and how often (occupancy).",
 }
-RUN_LABELS = {"calculate": "Run analysis", "cluster": "Run clustering", "visualize": "Write script"}
+RUN_LABELS = {"calculate": "Run analysis", "cluster": "Run clustering", "visualize": "Write script",
+              "hydration": "Find hydration sites"}
 
 
 class Cancelled(Exception):
@@ -473,22 +499,23 @@ class GephyraApp:
             b.grid(row=3 + i, column=0, sticky="ew", padx=10, pady=1)
             self.nav_buttons[stage] = b
 
-        side.rowconfigure(6, weight=1)
-        ttk.Label(side, text="OUTPUT FOLDER", style="SideSection.TLabel").grid(row=7, column=0, sticky="w", padx=22, pady=(0, 4))
+        spacer = 3 + len(forms.STAGES)          # rows below the steps follow it
+        side.rowconfigure(spacer, weight=1)
+        ttk.Label(side, text="OUTPUT FOLDER", style="SideSection.TLabel").grid(row=spacer + 1, column=0, sticky="w", padx=22, pady=(0, 4))
         self.outdir_label = ttk.Label(side, style="SidePath.TLabel", wraplength=224, justify="left")
-        self.outdir_label.grid(row=8, column=0, sticky="ew", padx=22)
+        self.outdir_label.grid(row=spacer + 2, column=0, sticky="ew", padx=22)
         self.outdir_var.trace_add("write", lambda *_: self._update_outdir_label())
         self._update_outdir_label()
         _Tooltip(self, self.outdir_label, "All results are saved here. Output names in the forms are relative to this "
                                           "folder; an absolute path in a field overrides it.")
         od = ttk.Frame(side, style="Sidebar.TFrame")
-        od.grid(row=9, column=0, sticky="ew", padx=20, pady=(8, 18))
+        od.grid(row=spacer + 3, column=0, sticky="ew", padx=20, pady=(8, 18))
         ttk.Button(od, text="Change…", style="Side.TButton", command=self.choose_outdir).pack(side="left")
         ttk.Button(od, text="Open", style="Side.TButton", command=lambda: self._open_folder(self.outdir())).pack(side="left", padx=6)
         self.theme_button = ttk.Button(side, text=self._theme_label(), style="Side.TButton", command=self.toggle_theme)
-        self.theme_button.grid(row=10, column=0, sticky="w", padx=20)
+        self.theme_button.grid(row=spacer + 4, column=0, sticky="w", padx=20)
         ttk.Label(side, text=f"Version {__version__}   ·   Ctrl+Enter runs a step", style="SideMuted.TLabel").grid(
-            row=11, column=0, sticky="w", padx=22, pady=(10, 18))
+            row=spacer + 5, column=0, sticky="w", padx=22, pady=(10, 18))
 
         # Main column -----------------------------------------------------
         main = ttk.Frame(root)
@@ -649,7 +676,7 @@ class GephyraApp:
         mode = v["mode"].get()
         w["frame"].configure(state="normal" if mode == "frame" else "disabled")
         w["cluster_id"].configure(state="normal" if mode == "cluster" else "disabled")
-        w["top_clusters"].configure(state="normal" if mode == "cluster" else "disabled")
+        w["top_clusters"].configure(state="normal" if mode in ("cluster", "sites") else "disabled")
         w["chimerax_model"].configure(state="normal" if v["format"].get() == "chimerax" else "disabled")
         scene = v["with_structure"].get() == "1"
         for name in ("topo", "traj", "context"):
@@ -854,6 +881,9 @@ class GephyraApp:
         if stage == "calculate" and isinstance(result, dict) and result.get("n_paths") == 0:
             self._on_empty(stage, kwargs, result, "No water bridges found", warning)
             return
+        if stage == "hydration" and isinstance(result, dict) and result.get("n_sites") == 0:
+            self._on_empty(stage, kwargs, result, "No persistent hydration sites", warning)
+            return
         if stage == "cluster" and isinstance(result, dict) and result.get("n_clusters") == 0:
             self._on_empty(stage, kwargs, result, "No recurring channels", warning)
             return
@@ -908,6 +938,17 @@ class GephyraApp:
             headline = "Clustering complete"
             n = (result or {}).get("n_clusters")
             body = f"{n} recurring water-bridge channels identified." if n is not None else "Clusters written successfully."
+            next_action = ("Next: Visualization  →", lambda: self.show_stage("visualize"))
+        elif stage == "hydration":
+            out = kwargs["output_file"]
+            self.vars["visualize"]["data"].set(out)
+            self.vars["visualize"]["mode"].set("sites")
+            summary = result or {}
+            headline = "Hydration sites found"
+            body = (f"{summary.get('n_sites', '?')} hydration sites occupied in at least "
+                    f"{kwargs['min_occupancy']:.0%} of the {summary.get('n_frames', '?')} analysed frames; the most "
+                    f"occupied is filled {summary.get('top_occupancy', 0):.0%} of the time (bulk water would give about "
+                    "13% for a 1 Å site).")
             next_action = ("Next: Visualization  →", lambda: self.show_stage("visualize"))
         else:
             script = files[0] if files else forms.visualize_output_path(kwargs)

@@ -92,6 +92,11 @@ Gephyra (derived from the Ancient Greek word for "bridge") is a network-graph an
     styles the whole picture by itself: protein as cartoon, ligand and waters
     as sticks, water bridges as dashed bonds or colour-coded tubes.
 
+- **Hydration sites:** `gephyra hydration` finds the spots in the first
+  hydrogen-bond shells around the root where waters sit persistently, with
+  their occupancy, residence time and contact atoms (a frequency analysis, no
+  clustering), and `visualize --mode sites` draws them over the protein.
+
 - **Graphical interface:** `gephyra gui` opens a desktop window (dark or light
   theme) that runs the whole workflow without memorising command-line flags.
   A step-by-step PDF manual is in [`docs/Gephyra-GUI-Manual.pdf`](docs/Gephyra-GUI-Manual.pdf).
@@ -354,6 +359,71 @@ first, then the script. In ChimeraX, atoms are then addressed as
 `#1@@serial_number=N` (the topology's atom IDs), so the structure must be model
 `#1` (or pass `--chimerax_model`), and a multi-model PDB trajectory must be
 opened as one model with `open traj.pdb coordset true`.
+
+### 4. Hydration sites
+
+A separate analysis, independent of water bridges: **where do waters around
+the root sit persistently, and how often?** It answers questions such as which
+binding-site waters are structural and which only visit.
+
+```bash
+gephyra hydration --topo system.prmtop --traj run.dcd --root "resname LIG" \
+  --max_shell 1 --stride 10 --output hydration_sites.json --csv sites.csv --map hydration_map.dx
+
+gephyra visualize --data hydration_sites.json --format chimerax --mode sites --output sites_scene
+```
+
+How it works (a frequency analysis, no clustering):
+
+1. **Shells.** In every analysed frame, water oxygens are assigned to
+   hydrogen-bond shells around the root, with the same shell-by-shell search
+   as the bridge analysis. Shell 1 holds waters within `--shell_cutoff`
+   (3.5 Å) of a root atom, and shell *k* holds waters within that distance of
+   a shell *k*−1 water. Waters up to `--max_shell` (1–3) are kept.
+2. **Common frame.** Their positions are superposed on the protein (`--align`,
+   as in `calculate`), so a spot has the same coordinates in every frame.
+3. **Counting.** All positions are counted on a 0.5 Å grid. Spots are the
+   highest counts, taken greedily and at least 2.5 Å apart, since two waters
+   cannot share a spot.
+4. **Per spot:**
+   - *occupancy*: the fraction of analysed frames in which any water oxygen is
+     within `--site_radius` (1 Å) of the spot. It belongs to the spot, not to
+     one molecule, because waters exchange.
+   - *enrichment*: occupancy relative to bulk water, where a 1 Å sphere holds
+     an oxygen about 13% of the time.
+   - *mean and longest residence*: runs of consecutive analysed frames.
+   - *shell*.
+   - *contacts*: the solute heavy atoms the occupying waters touch most often,
+     with how often and the mean distance, measured frame by frame so that
+     flexible residues are handled correctly.
+
+Spots occupied in at least `--min_occupancy` (0.2) of the frames are reported.
+
+| Option | Default | Description |
+|---|---|---|
+| `--root` | required | Where the shells start: an atom (e.g. a ligand oxygen) or a whole residue. |
+| `--max_shell` | `1` | Shells to include, 1–3. |
+| `--shell_cutoff` | `3.5` | Oxygen-to-heavy-atom distance (Å) defining a shell contact. |
+| `--stride` | `1` | Analyse every Nth frame. Residence times are counted in analysed frames. |
+| `--align` | `auto` | Superposition atoms (`auto`: protein Cα). Use the ligand residue (e.g. `"resname LIG"`) when the ligand moves within its pocket and its own hydration pattern is what matters. `--no_align` keeps trajectory coordinates. |
+| `--site_radius` | `1.0` | Radius (Å) within which a water occupies a spot. |
+| `--min_occupancy` | `0.2` | Report spots occupied at least this fraction of the time. |
+| `--output` | `hydration_sites.json` | Sites with the analysed system; input for `visualize --mode sites`. |
+| `--csv` | — | Table: position, occupancy, enrichment, residence, shell, main contact. |
+| `--map` | — | OpenDX water-density map relative to bulk (1 = bulk), smoothed like the spot search. |
+| `--pdb` | — | Site centres as a PDB (occupancy column = occupancy, B-factor = enrichment). |
+
+`visualize --mode sites` draws each spot as a sphere sized and coloured by
+occupancy (≥ 0.8 red, ≥ 0.6 orange, ≥ 0.4 yellow, ≥ 0.2 cyan, below that blue)
+over the protein and root, with a legend. If a map was written, it is drawn as a
+surface enclosing the reported spots. `--top_clusters N` limits the picture to
+the N most occupied spots.
+
+Interpreting occupancies: in binding sites most waters exchange quickly, so
+occupancies of 0.2–0.4 (2–3× bulk) are typical; values close to 1 with long
+residences indicate structural waters. If nothing passes the threshold, the
+message gives the best occupancy found. Lower `--min_occupancy`, or superpose on
+the ligand if it moves within the pocket.
 
 ## Solvent naming conventions
 

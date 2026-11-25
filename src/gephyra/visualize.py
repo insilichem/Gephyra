@@ -23,12 +23,12 @@ import os
 import re
 from dataclasses import dataclass, field
 
-from .results import detect_data_kind, load_clusters, structure_info  # noqa: F401  (detect_data_kind re-exported)
+from .results import detect_data_kind, load_clusters, load_sites, structure_info  # noqa: F401  (detect_data_kind re-exported)
 
 logger = logging.getLogger(__name__)
 
 VISUALIZE_FORMATS = ["vmd", "pymol", "chimera", "chimerax"]
-VISUALIZE_MODES = ["density", "frame", "cluster"]
+VISUALIZE_MODES = ["density", "frame", "cluster", "sites"]
 SCRIPT_EXTENSIONS = {"vmd": ".tcl", "pymol": ".py", "chimera": ".py", "chimerax": ".cxc"}
 
 # How to run each script, shown in script headers, logs and the interface.
@@ -56,6 +56,20 @@ CLUSTER_PALETTE = [
 # VMD's graphics colours are a fixed named set; these are the closest to the palette.
 VMD_PALETTE = ["orange", "blue", "green", "red", "purple", "ochre", "pink", "gray", "lime", "cyan"]
 DENSITY_RGB = (0.0, 0.8, 0.8)
+
+# Hydration-site colours by occupancy: (lower bound, RGB, VMD colour name).
+SITE_COLOURS = [
+    (0.8, (0.84, 0.15, 0.16), "red"),
+    (0.6, (1.00, 0.50, 0.00), "orange"),
+    (0.4, (0.95, 0.77, 0.06), "yellow"),
+    (0.2, (0.09, 0.75, 0.81), "cyan"),
+    (0.0, (0.12, 0.47, 0.71), "blue"),
+]
+SITE_MAP_LEVEL = 1.5        # fallback isosurface level (multiples of bulk density) when the file records none
+
+
+def site_colour(occupancy):
+    return next(rgb for lower, rgb, _ in SITE_COLOURS if occupancy >= lower)
 FRAME_RGB = (1.0, 0.5, 0.0)
 
 DEFAULT_CHIMERAX_SCENE_ID = "#101"
@@ -164,6 +178,7 @@ class Plan:
     legend: list = field(default_factory=list)       # (text, rgb)
     scene: object = None                             # scene.Scene or None
     frame: object = None                             # trajectory frame for 'frame' mode
+    volume: object = None                            # {"path", "level"}: a density map drawn as a mesh
     # Geometry-only 'frame' mode: atoms of a structure the user loads themselves.
     atom_indices: list = field(default_factory=list)   # 0-based (VMD)
     atom_serials: list = field(default_factory=list)   # topology atom ids (Chimera/ChimeraX)
@@ -303,6 +318,33 @@ def build_plan(data_file, mode, frame_idx=None, cluster_id=None, max_bond_draw_d
             plan.scene = _snapshot(structure, int(ref) if ref is not None else 0, snapshot_path, [])
         return plan
 
+    if mode == "sites":
+        sites, meta = load_sites(data_file)
+        if top_clusters is not None:
+            sites = sites[:top_clusters]
+        if not sites:
+            logger.warning(f"{os.path.basename(data_file)} contains no hydration sites, so there is nothing to draw. "
+                           "See the warning from the hydration analysis (e.g. lower the minimum occupancy).")
+            return None
+        plan = Plan("sites", f"{len(sites)} hydration sites", source)
+        for site in sites:
+            occupancy = site["occupancy"]
+            g = Group(f"Site {site['site_id']}", site_colour(occupancy), cyl_radius=0.0,
+                      sphere_radius=round(0.30 + 0.35 * occupancy, 3),
+                      comment=f"Site {site['site_id']}: occupancy {occupancy:.2f}, shell {site.get('shell', '?')}")
+            g.spheres.append(site["position"])
+            plan.groups.append(g)
+        for site in sites[:20]:
+            plan.legend.append((f"Site {site['site_id']}  occ {site['occupancy']:.2f}  shell {site.get('shell', '?')}",
+                                site_colour(site["occupancy"])))
+        dx = meta.get("dx_file")
+        if dx and os.path.isfile(dx):
+            plan.volume = {"path": os.path.abspath(dx), "level": meta.get("map_level") or SITE_MAP_LEVEL}
+        if structure:
+            reference = (meta.get("alignment") or {}).get("reference_frame", 0)
+            plan.scene = _snapshot(structure, int(reference), snapshot_path, [])
+        return plan
+
     raise ValueError(f"Unknown mode {mode!r}; expected one of {', '.join(VISUALIZE_MODES)}.")
 
 
@@ -338,6 +380,9 @@ def _tcl_path(path):
 def _vmd_colour(rgb):
     if rgb in CLUSTER_PALETTE:
         return VMD_PALETTE[CLUSTER_PALETTE.index(rgb)]
+    for _, site_rgb, name in SITE_COLOURS:
+        if rgb == site_rgb:
+            return name
     return "cyan" if rgb == DENSITY_RGB else "orange"
 
 def write_vmd(plan, output_file):
@@ -401,6 +446,12 @@ def write_vmd(plan, output_file):
         out.append(f"gephyra_draw {'$gmol' if s else '[molinfo top]'}\n")
     if plan.mode == "frame" and not s and plan.frame is not None:
         out.append(f"animate goto {plan.frame}\n")
+    if plan.volume:
+        # Water-density map (relative to bulk) as a wireframe isosurface.
+        target_mol = "$gmol" if s else "[molinfo top]"
+        out.append(f"mol addfile {_tcl_path(plan.volume['path'])} type dx waitfor all molid {target_mol}\n"
+                   f"mol representation Isosurface {plan.volume['level']} 0 0 1 1 1\nmol color ColorID 10\n"
+                   f"mol selection all\nmol material Opaque\nmol addrep {target_mol}\n")
     out.append("display resetview\naxes location off\n")
     if s:
         # Centre on the ligand and waters rather than the whole protein.
@@ -460,6 +511,10 @@ def write_pymol(plan, output_file):
             out.append(f"obj += [SPHERE, {p[0]:.3f}, {p[1]:.3f}, {p[2]:.3f}, {g.sphere_radius:.3f}]\n")
         out.append(f"cmd.load_cgo(obj, '{name}', state=1)\n" if named or i == 0 else
                    f"cmd.load_cgo(obj, '{name}_{i}', state=1)\n")
+    if plan.volume:
+        out.append(f"cmd.load(r'{plan.volume['path']}', 'gephyra_map')\n"
+                   f"cmd.isomesh('gephyra_mesh', 'gephyra_map', {plan.volume['level']})\n"
+                   "cmd.color('cyan', 'gephyra_mesh')\ncmd.disable('gephyra_map')\n")
     if s and s.bridges:
         het_sel = f" or resn {'+'.join(s.hetero_resnames)}" if s.hetero_resnames else ""
         out.append(f"cmd.orient('gephyra_structure and (chain {s.root_chain} or chain {s.water_chain}{het_sel})')\n")
@@ -542,6 +597,12 @@ def write_chimera(plan, output_file):
         out.append("ref = mol if 'mol' in globals() else next((m for m in openModels.list() "
                    "if hasattr(m, 'atoms') and m is not geo), None)\n"
                    "if ref is not None:\n    geo.openState.xform = ref.openState.xform\n")
+    if plan.volume:
+        out.append(f"vol = openModels.open(r'{plan.volume['path']}')[0]\nvol.name = 'gephyra_map'\n"
+                   f"rc('volume #%d level {plan.volume['level']} style mesh color cyan' % vol.id)\n"
+                   "ref = mol if 'mol' in globals() else next((m for m in openModels.list() "
+                   "if hasattr(m, 'atoms')), None)\n"
+                   "if ref is not None:\n    vol.openState.xform = ref.openState.xform\n")
     # 2D labels need a graphics context; keep going (and print the legend)
     # when Chimera runs without one, e.g. with --nogui.
     if plan.legend:
@@ -601,7 +662,7 @@ def write_chimerax(plan, output_file, model_spec=None):
             raise ValueError("The ChimeraX scene needs a top-level model id such as #101, not a sub-model.")
         n = int(base[1:])
         mid, gid = f"#{n}", f"#{n + 1}"
-        out.append(f"close {mid}-{n + 2}\n")
+        out.append(f"close {mid}-{n + 3}\n")
         out.append(f"open {_cxc_quote(s.pdb_path)} id {n}\n")
         # Explicit chain specs, not 'protein'/'solvent' categories: ChimeraX's
         # residue classification varies (e.g. MCPB-renamed metal-site residues).
@@ -628,9 +689,13 @@ def write_chimerax(plan, output_file, model_spec=None):
                     pf.write(f"{mid}@@serial_number={a} {mid}@@serial_number={b}\n")
             written.append(pb)
             out.append(f"open {_cxc_quote(pb)} id {n + 2}\n")
+        if plan.volume:
+            out.append(f"open {_cxc_quote(plan.volume['path'])} id {n + 3}\n"
+                       f"volume #{n + 3} style surface level {plan.volume['level']} color #22d3ee transparency 0.6\n")
         out.extend(_chimerax_legend(plan))
         het_focus = f" | {mid}:{','.join(s.hetero_resnames)}" if s.hetero_resnames else ""
         focus = (f"{mid}/{s.water_chain} | {mid}/{s.root_chain}{het_focus}" if s.bridges
+                 else f"{gid} | {mid}/{s.root_chain}{het_focus}" if plan.mode == "sites" and plan.groups
                  else f"{mid} {gid}" if plan.groups else mid)
         out.append(f"view {focus}\nlighting soft\ngraphics silhouettes true\n")
     else:
@@ -660,7 +725,10 @@ def write_chimerax(plan, output_file, model_spec=None):
         elif plan.mode == "density":
             out.append(f"open {_cxc_quote(bild)} name gephyra_density\n")
         else:
-            out.append(f"open {_cxc_quote(bild)} name gephyra_clusters\n")
+            out.append(f"open {_cxc_quote(bild)} name gephyra_{'sites' if plan.mode == 'sites' else 'clusters'}\n")
+            if plan.volume:
+                out.append(f"open {_cxc_quote(plan.volume['path'])} name gephyra_map\n"
+                           f"volume style surface level {plan.volume['level']} color #22d3ee transparency 0.6\n")   # all open maps
             out.extend(_chimerax_legend(plan))
     with open(output_file, "w") as f:
         f.writelines(out)
@@ -757,6 +825,13 @@ def run_visualization(data_file, format="vmd", mode="density", frame_idx=None, c
     if mode in ("frame", "density") and kind == "cluster":
         logger.error(f"--mode {mode} expects the .jsonl written by 'gephyra calculate', but {data_file} "
                      "looks like a clustered_pathways.json. Use --mode cluster for that file.")
+        return None
+    if (mode == "sites") != (kind == "sites"):
+        if mode == "sites":
+            logger.error(f"--mode sites expects the JSON written by 'gephyra hydration', but {data_file} is a "
+                         f"{'calculate .jsonl' if kind == 'jsonl' else 'cluster file' if kind == 'cluster' else 'different file'}.")
+        else:
+            logger.error(f"{data_file} is a hydration-site file; use --mode sites to draw it.")
         return None
     if format not in RENDERERS:
         logger.error(f"Unknown format: {format}")

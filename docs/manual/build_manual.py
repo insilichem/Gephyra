@@ -38,7 +38,7 @@ LINE = colors.HexColor("#d6dde5")
 
 # file name -> what the screenshot should show (also the placeholder text)
 SCREENSHOTS = {
-    "01_overview.png": "The main window: sidebar with the three steps and the output folder, the form, the progress bar and the log.",
+    "01_overview.png": "The main window: sidebar with the steps and the output folder, the form, the progress bar and the log.",
     "01b_output_folder.png": "Choosing the output folder with Change... in the sidebar.",
     "02_analysis.png": "Step 1, Pathway Analysis, filled in with a topology, a trajectory and a root selection.",
     "02b_analysis_running.png": "While the analysis runs: the progress bar counts frames and the log streams messages.",
@@ -206,14 +206,16 @@ def story():
           P("Gephyra finds chains of water molecules that connect a chosen <i>root</i> atom (for example a ligand "
             "oxygen) to the surrounding solvent in a molecular dynamics trajectory, groups the chains that recur "
             "into spatial channels, and writes ready-to-run scenes for molecular viewers."),
-          P("The graphical interface runs the whole workflow in three steps, without memorising command-line "
+          P("The graphical interface runs the whole workflow in a few steps, without memorising command-line "
             "options:"),
           *bullets(["<b>1. Pathway Analysis</b> reads the topology and trajectory and writes every water bridge, "
                     "frame by frame, to a results file (<font face='Courier'>.jsonl</font>).",
                     "<b>2. Clustering</b> groups the bridges that recur in space into channels and writes a "
                     "cluster file (<font face='Courier'>.json</font>).",
                     "<b>3. Visualization</b> writes a script for UCSF ChimeraX, UCSF Chimera, PyMOL or VMD that "
-                    "loads the protein, the ligand and the water network and shows them together."]),
+                    "loads the protein, the ligand and the water network and shows them together.",
+                    "<b>4. Hydration Sites</b> is a separate analysis: it finds the spots around the root where waters "
+                    "sit persistently and reports how often each is occupied; step 3 then draws them."]),
           P("Every step shows its progress live, can be cancelled, and ends with a confirmation that lists the files "
             "written and the folder they are in."),
           ]
@@ -258,7 +260,7 @@ def story():
     s += [PageBreak(), H1("3. The window at a glance"),
           screenshot("01_overview.png"),
           table([["Area", "What it does"],
-                 ["Sidebar: workflow", "The three steps. Click one to open its form; the current step is highlighted."],
+                 ["Sidebar: workflow", "The steps. Click one to open its form; the current step is highlighted."],
                  ["Sidebar: output folder", "Where all results are saved. <b>Change...</b> picks another folder, "
                   "<b>Open</b> shows it in your file manager."],
                  ["Sidebar: theme", "Switches between the dark and the light theme. The choice is remembered."],
@@ -393,7 +395,43 @@ def story():
           screenshot("09_scene_clusters.png"),
           ]
 
-    s += [PageBreak(), H1("7. Output files"),
+    s += [PageBreak(), H1("7. Step 4 - Hydration Sites"),
+          P("A separate analysis, independent of water bridges: where do the waters around the root sit "
+            "persistently, and how often? It shows which binding-site waters are structural and which only visit."),
+          P("In every analysed frame, Gephyra takes the waters in the first hydrogen-bond shells around the root "
+            "(shell 1: waters within hydrogen-bond distance of the root; shells 2 and 3: waters hydrogen-bonded to "
+            "the previous shell), superposes them on the protein so a spot keeps its coordinates, and counts where "
+            "their oxygens are. The most frequently visited spots are the hydration sites. This is a frequency "
+            "analysis; nothing is clustered."),
+          table([["Field", "Meaning", "Default"],
+                 ["Root selection", "Where the shells start: an atom (e.g. a ligand oxygen) or a whole residue.", "required"],
+                 ["Max shell", "How many hydrogen-bond shells to include (1, 2 or 3).", "1"],
+                 ["Shell cutoff", "Oxygen-to-heavy-atom distance that defines a shell contact, in angstrom.", "3.5"],
+                 ["Site radius", "A water occupies a spot when its oxygen is within this distance of it.", "1.0"],
+                 ["Min occupancy", "Report spots occupied in at least this fraction of the frames.", "0.2"],
+                 ["Superpose on", "auto = protein C-alpha atoms. Use the ligand residue if the ligand moves within the "
+                  "pocket and its own hydration is what matters.", "auto"],
+                 ["Density map", "Optional map of the water density relative to bulk, drawn around the sites.",
+                  "hydration_map.dx"]],
+                [3.4 * cm, 10.1 * cm, 3.0 * cm]),
+          H2("What is reported for each site"),
+          *bullets(["<b>Occupancy</b>: the fraction of analysed frames in which a water oxygen is within the site "
+                    "radius. It belongs to the spot, not to one molecule, because waters exchange.",
+                    "<b>Enrichment</b>: occupancy compared with bulk water, where a 1 angstrom sphere holds an oxygen "
+                    "about 13% of the time.",
+                    "<b>Residence</b>: the mean and longest runs of consecutive analysed frames.",
+                    "<b>Shell</b> and <b>contacts</b>: the shell the site belongs to and the protein or ligand atoms "
+                    "its waters touch most often, with the mean distance."]),
+          tip("In binding sites most waters exchange quickly, so occupancies of 0.2-0.4 (two to three times bulk) "
+              "are typical; values near 1 with long residences are structural waters. If no site passes the "
+              "minimum occupancy, the message reports the best one found."),
+          P("When it finishes, a confirmation reports how many sites were found and how occupied the best one is. "
+            "<b>Next: Visualization</b> opens step 3 in <b>sites</b> mode: each site is drawn as a sphere sized and "
+            "coloured by occupancy (red above 0.8, orange, yellow, cyan, blue below 0.2) over the protein, with a "
+            "legend and the density map as a surface."),
+          ]
+
+    s += [PageBreak(), H1("8. Output files"),
           table([["File", "Written by", "Contents"],
                  ["results.jsonl", "Step 1", "One line per analysed frame with every water bridge (atoms, coordinates, "
                   "H-quality score), plus the analysed topology/trajectory and settings."],
@@ -403,14 +441,16 @@ def story():
                  ["name.cxc / .py / .tcl", "Step 3", "The viewer script."],
                  ["name_structure.pdb", "Step 3", "The protein, ligand and bridging waters loaded by the script."],
                  ["name.bild, name.pb", "Step 3", "Network geometry and pseudobonds used by the Chimera and ChimeraX "
-                  "scripts."]],
+                  "scripts."],
+                 ["hydration_sites.json", "Step 4", "The hydration sites with occupancy, residence, shell and contacts."],
+                 ["hydration_map.dx", "Step 4 (optional)", "Water density relative to bulk, for surfaces in viewers."]],
                 [4.2 * cm, 3.0 * cm, 9.3 * cm]),
           P("H-quality (Z) sums the geometric quality of every route through a channel. It is not a probability and "
             "can exceed 1 for channels with many parallel routes; <i>hquality_norm</i> = Z/(1+Z) is a bounded "
             "version for comparisons. See the README for details."),
           ]
 
-    s += [H1("8. Troubleshooting"),
+    s += [H1("9. Troubleshooting"),
           table([["Message or symptom", "What to do"],
                  ["Text looks blocky or pixelated", "Install the anti-aliased Tk build: <font face='Courier'>conda "
                   "install -c conda-forge \"tk=*=xft*\"</font> (section 2)."],
@@ -439,7 +479,7 @@ def story():
                 [5.4 * cm, 11.1 * cm]),
           ]
 
-    s += [H1("9. Command-line equivalents"),
+    s += [H1("10. Command-line equivalents"),
           P("Every run writes its command-line equivalent to the log, and <b>Copy CLI command</b> copies it, so a "
             "setup made in the interface can be repeated in scripts or on a cluster. For example:"),
           code('gephyra calculate --topo system.prmtop --traj run.dcd \\\n'
@@ -449,7 +489,7 @@ def story():
                '    --mode cluster --top_clusters 10 --output cluster_scene'),
           ]
 
-    s += [H1("10. Video walkthrough")]
+    s += [H1("11. Video walkthrough")]
     if VIDEO_URL:
         s += [P(f"A short video shows the interface in use: <link href='{VIDEO_URL}' color='#0891b2'>{VIDEO_URL}</link>")]
     else:

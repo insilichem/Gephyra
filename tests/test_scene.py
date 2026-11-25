@@ -142,7 +142,7 @@ class TestPipelineScenes(_Tmp):
 
     def test_frame_scene_scripts_for_every_viewer(self):
         expect = {
-            "chimerax": ["close #101-103", "id 101", "show #101/Y,W", ".pb\" id 103"],
+            "chimerax": ["close #101-104", "id 101", "show #101/Y,W", ".pb\" id 103"],
             "chimera": ["openModels.open(r'", "getPseudoBondGroup", "newPseudoBond"],
             "pymol": ["cmd.load(r'", "cmd.distance('gephyra_bridges'", "cmd.unbond("],
             "vmd": ["mol new {", "style dashed", "Licorice", "# Run it with: vmd -e vmd.tcl", "The -e is required"],

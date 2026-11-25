@@ -25,6 +25,15 @@ def load_clusters(path):
     raise ValueError(f"{path} is not a Gephyra cluster file.")
 
 
+def load_sites(path):
+    """(sites, metadata) from a hydration-site file written by `gephyra hydration`."""
+    with open(path) as f:
+        obj = json.load(f)
+    if isinstance(obj, dict) and obj.get("type") == "gephyra_hydration_sites" and isinstance(obj.get("sites"), list):
+        return obj["sites"], obj.get("metadata") or {}
+    raise ValueError(f"{path} is not a Gephyra hydration-site file.")
+
+
 def read_jsonl_metadata(path):
     """The metadata line of a `calculate` .jsonl file, or {} if there is none."""
     with open(path) as f:
@@ -38,7 +47,8 @@ def read_jsonl_metadata(path):
 def detect_data_kind(path):
     """
     'jsonl' for the line-delimited output of `calculate`, 'cluster' for a
-    cluster file (old list or new envelope format), None otherwise.
+    cluster file (old list or new envelope format), 'sites' for a
+    hydration-site file, None otherwise.
     """
     with open(path) as f:
         first = ""
@@ -56,12 +66,17 @@ def detect_data_kind(path):
         except ValueError:
             obj = None  # a multi-line JSON document: the cluster envelope
         if isinstance(obj, dict):
-            return "jsonl" if obj.get("type") in JSONL_TYPES else ("cluster" if "clusters" in obj else None)
-        try:
-            load_clusters(path)
-            return "cluster"
-        except (ValueError, OSError):
-            return None
+            if obj.get("type") in JSONL_TYPES:
+                return "jsonl"
+            return "cluster" if "clusters" in obj else ("sites" if "sites" in obj else None)
+        # A multi-line JSON document: a cluster or hydration-site envelope.
+        for kind, loader in (("cluster", load_clusters), ("sites", load_sites)):
+            try:
+                loader(path)
+                return kind
+            except (ValueError, OSError):
+                continue
+        return None
     return None
 
 
@@ -76,6 +91,8 @@ def structure_info(path):
         meta = read_jsonl_metadata(path)
     elif kind == "cluster":
         meta = load_clusters(path)[1]
+    elif kind == "sites":
+        meta = load_sites(path)[1]
     params = meta.get("parameters", {}) if meta else {}
     return {
         "topo_file": meta.get("topo_file") if meta else None,

@@ -115,7 +115,7 @@ def build_parser():
     vis_parser.add_argument("--format", choices=VISUALIZE_FORMATS, default="vmd",
         help="Target visualization software: vmd (.tcl), pymol (.py), chimera (legacy UCSF Chimera, .py + .bild) "
              "or chimerax (UCSF ChimeraX, .cxc + .bild, plus .pb pseudobonds in frame mode).")
-    vis_parser.add_argument("--mode", choices=VISUALIZE_MODES, default="density", help="Visualization mode: 'density' (all frames), 'frame' (single frame), or 'cluster' (clustered medoids).")
+    vis_parser.add_argument("--mode", choices=VISUALIZE_MODES, default="density", help="Visualization mode: 'density' (all frames), 'frame' (single frame), 'cluster' (clustered medoids) or 'sites' (hydration sites from 'gephyra hydration').")
     vis_parser.add_argument("--frame", type=int, default=None, help="Frame index to visualize (only used if mode='frame').")
     vis_parser.add_argument("--cluster_id", type=int, default=None, help="Specific cluster ID to visualize (only used if mode='cluster'). If None, visualizes all clusters.")
     vis_parser.add_argument("--output", default="pathways_viz", help="Output script file name or prefix.")
@@ -139,6 +139,36 @@ def build_parser():
              "before the cylinder is treated as a PBC artifact and skipped. "
              "Should be slightly larger than your --coarse_cutoff value. "
              "Default: 6.0 Å (safe for the default coarse_cutoff of 4.5 Å).")
+
+    # --- Hydration-site Subcommand ---
+    hyd_parser = subparsers.add_parser("hydration",
+        help="Find the spots around the root where waters sit persistently (hydration-site occupancy analysis).")
+    hyd_parser.add_argument("--topo", required=True, help="Topology file (e.g., .prmtop, .pdb, .tpr).")
+    hyd_parser.add_argument("--traj", required=True, help="Trajectory file (e.g., .dcd, .xtc, .nc).")
+    hyd_parser.add_argument("--root", required=True,
+        help="MDAnalysis selection the shells start from: an atom (e.g. a ligand oxygen) or a whole residue.")
+    hyd_parser.add_argument("--water", default="resname SOL or resname WAT or resname HOH", help="Water selection.")
+    hyd_parser.add_argument("--stride", type=_positive_int, default=1, help="Analyse every Nth frame.")
+    hyd_parser.add_argument("--max_shell", type=int, choices=(1, 2, 3), default=1,
+        help="Hydrogen-bond shells to include: 1 = waters within hydrogen-bond distance of the root; 2 and 3 "
+             "add the waters hydrogen-bonded to the previous shell. Default 1.")
+    hyd_parser.add_argument("--shell_cutoff", type=_positive_float, default=3.5,
+        help="Oxygen-oxygen (heavy-atom) distance in A that defines a shell contact. Default 3.5.")
+    hyd_parser.add_argument("--align", default="auto",
+        help="Atoms to superpose frames on, so spots keep fixed coordinates (default 'auto': protein C-alpha). "
+             "Pass the ligand residue (e.g. 'resname LIG') to follow a ligand that moves within its pocket.")
+    hyd_parser.add_argument("--no_align", action="store_true", help="Do not superpose frames.")
+    hyd_parser.add_argument("--site_radius", type=_positive_float, default=1.0,
+        help="A water occupies a spot when its oxygen is within this distance (A) of the spot. Default 1.0.")
+    hyd_parser.add_argument("--min_occupancy", type=float, default=0.2,
+        help="Report spots occupied in at least this fraction of the analysed frames. Default 0.2 "
+             "(bulk water gives about 0.13 for a 1 A radius).")
+    hyd_parser.add_argument("--output", default="hydration_sites.json", help="Output JSON with the sites.")
+    hyd_parser.add_argument("--csv", default=None, help="Optional CSV table of the sites.")
+    hyd_parser.add_argument("--map", default=None,
+        help="Optional OpenDX map of the water density relative to bulk (1 = bulk), for isosurfaces in viewers.")
+    hyd_parser.add_argument("--pdb", default=None,
+        help="Optional PDB of the site centres (occupancy column = occupancy, B-factor = enrichment over bulk).")
 
     # --- GUI Subcommand ---
     subparsers.add_parser("gui", help="Open the graphical interface (tkinter) for the whole workflow.")
@@ -213,6 +243,16 @@ def _dispatch(args):
             output_file=args.output,
         )
         
+    elif args.command == "hydration":
+        from .hydration import run_hydration_sites
+        run_hydration_sites(
+            topo_file=args.topo, traj_file=args.traj, root_sel=args.root, water_sel=args.water,
+            stride=args.stride, max_shell=args.max_shell, shell_cutoff=args.shell_cutoff,
+            align_sel=None if args.no_align else args.align, site_radius=args.site_radius,
+            min_occupancy=args.min_occupancy, output_file=args.output, csv_file=args.csv,
+            dx_file=args.map, pdb_file=args.pdb,
+        )
+
     elif args.command == "visualize":
         return run_visualization(
             data_file=args.data,

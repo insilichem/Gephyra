@@ -21,7 +21,7 @@ import shlex
 from .results import detect_data_kind, structure_info
 from .visualize import SCRIPT_EXTENSIONS, VISUALIZE_FORMATS, VISUALIZE_MODES, validate_chimerax_model
 
-STAGES = ("calculate", "cluster", "visualize")
+STAGES = ("calculate", "cluster", "visualize", "hydration")
 
 DEFAULT_WATER = "resname SOL or resname WAT or resname HOH"
 
@@ -45,6 +45,12 @@ DEFAULTS = {
         "with_structure": "1", "topo": "", "traj": "", "context": "",
         "max_bond_draw_dist": "6.0", "chimerax_model": "",
         "output": "pathways_viz",
+    },
+    "hydration": {
+        "topo": "", "traj": "", "root": "", "water": DEFAULT_WATER,
+        "stride": "1", "max_shell": "1", "shell_cutoff": "3.5", "align": "auto",
+        "site_radius": "1.0", "min_occupancy": "0.2",
+        "output": "hydration_sites.json", "csv": "", "map": "hydration_map.dx", "pdb": "",
     },
 }
 
@@ -190,6 +196,10 @@ def parse_visualize(values, outdir=""):
         raise FormError("data", "Mode 'cluster' needs the cluster file from step 2, not the .jsonl from step 1.")
     if mode in ("frame", "density") and kind == "cluster":
         raise FormError("data", f"Mode '{mode}' needs the .jsonl from step 1, not a cluster file.")
+    if mode == "sites" and kind != "sites":
+        raise FormError("data", "Mode 'sites' needs the hydration-site file from step 4 (Hydration Sites).")
+    if mode != "sites" and kind == "sites":
+        raise FormError("mode", "This is a hydration-site file: choose mode 'sites' to draw it.")
 
     with_structure = _flag(values, "with_structure")
     kwargs = {
@@ -198,7 +208,8 @@ def parse_visualize(values, outdir=""):
         "mode": mode,
         "frame_idx": _int(values, "frame", "Frame", minimum=0, optional=True) if mode == "frame" else None,
         "cluster_id": _int(values, "cluster_id", "Cluster ID", minimum=1, optional=True) if mode == "cluster" else None,
-        "top_clusters": _int(values, "top_clusters", "Top clusters", minimum=1, optional=True) if mode == "cluster" else None,
+        "top_clusters": (_int(values, "top_clusters", "Top clusters / sites", minimum=1, optional=True)
+                         if mode in ("cluster", "sites") else None),
         "output_file": _output_path(values, "output", "Output script", outdir),
         "max_bond_draw_dist": _float(values, "max_bond_draw_dist", "Max segment length"),
         "with_structure": with_structure,
@@ -214,7 +225,35 @@ def parse_visualize(values, outdir=""):
     return kwargs
 
 
-PARSERS = {"calculate": parse_calculate, "cluster": parse_cluster, "visualize": parse_visualize}
+def parse_hydration(values, outdir=""):
+    """Form strings -> keyword arguments for hydration.run_hydration_sites."""
+    max_shell = _int(values, "max_shell", "Max shell", minimum=1)
+    if max_shell > 3:
+        raise FormError("max_shell", f"Max shell must be 1, 2 or 3, got {max_shell}.")
+    min_occupancy = _float(values, "min_occupancy", "Minimum occupancy", positive=False, maximum=1.0)
+    if min_occupancy < 0:
+        raise FormError("min_occupancy", f"Minimum occupancy must be between 0 and 1, got {min_occupancy}.")
+    kwargs = {
+        "topo_file": _existing_file(values, "topo", "Topology file"),
+        "traj_file": _existing_file(values, "traj", "Trajectory file"),
+        "root_sel": _text(values, "root", required=True, label="Root selection"),
+        "water_sel": _text(values, "water", required=True, label="Water selection"),
+        "stride": _int(values, "stride", "Stride", minimum=1),
+        "max_shell": max_shell,
+        "shell_cutoff": _float(values, "shell_cutoff", "Shell cutoff"),
+        "align_sel": _alignment(values),
+        "site_radius": _float(values, "site_radius", "Site radius"),
+        "min_occupancy": min_occupancy,
+        "output_file": _output_path(values, "output", "Sites file", outdir),
+        "csv_file": _output_path(values, "csv", "CSV table", outdir) if _text(values, "csv") else None,
+        "dx_file": _output_path(values, "map", "Density map", outdir) if _text(values, "map") else None,
+        "pdb_file": _output_path(values, "pdb", "Sites PDB", outdir) if _text(values, "pdb") else None,
+    }
+    return kwargs
+
+
+PARSERS = {"calculate": parse_calculate, "cluster": parse_cluster, "visualize": parse_visualize,
+           "hydration": parse_hydration}
 
 
 def parse_stage(stage, values, outdir=""):
@@ -249,6 +288,10 @@ _CLI_FLAGS = {
                   ("topo_file", "--topo"), ("traj_file", "--traj"), ("context_sel", "--context"),
                   ("chimerax_model", "--chimerax_model"),
                   ("max_bond_draw_dist", "--max_bond_draw_dist"), ("output_file", "--output")],
+    "hydration": [("topo_file", "--topo"), ("traj_file", "--traj"), ("root_sel", "--root"), ("water_sel", "--water"),
+                  ("stride", "--stride"), ("max_shell", "--max_shell"), ("shell_cutoff", "--shell_cutoff"),
+                  ("align_sel", "--align"), ("site_radius", "--site_radius"), ("min_occupancy", "--min_occupancy"),
+                  ("output_file", "--output"), ("csv_file", "--csv"), ("dx_file", "--map"), ("pdb_file", "--pdb")],
 }
 
 
@@ -260,7 +303,7 @@ def build_command_line(stage, kwargs):
         if value is None or value == "":
             continue
         parts += [flag, str(value)]
-    if stage == "calculate" and "align_sel" in kwargs and kwargs["align_sel"] is None:
+    if stage in ("calculate", "hydration") and "align_sel" in kwargs and kwargs["align_sel"] is None:
         parts.append("--no_align")
     if stage == "visualize" and kwargs.get("with_structure") is False:
         parts.append("--no_structure")
@@ -289,6 +332,9 @@ def run_stage(stage, kwargs, progress_callback=None):
     if stage == "visualize":
         from .visualize import run_visualization
         return run_visualization(**kwargs)
+    if stage == "hydration":
+        from .hydration import run_hydration_sites
+        return run_hydration_sites(**kwargs, progress_callback=progress_callback)
     raise ValueError(f"Unknown stage {stage!r}; expected one of {', '.join(STAGES)}.")
 
 
@@ -304,6 +350,8 @@ def result_files(stage, kwargs, result):
     if stage == "visualize":
         return list(result or [])
     files = [kwargs["output_file"]]
-    if stage == "calculate" and kwargs.get("csv_file"):
+    if stage in ("calculate", "hydration") and kwargs.get("csv_file"):
         files.append(kwargs["csv_file"])
+    if stage == "hydration":
+        files += [kwargs.get("dx_file"), kwargs.get("pdb_file")]
     return [os.path.abspath(f) for f in files if f and os.path.exists(f)]
