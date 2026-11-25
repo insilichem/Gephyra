@@ -662,7 +662,9 @@ def write_chimerax(plan, output_file, model_spec=None):
             raise ValueError("The ChimeraX scene needs a top-level model id such as #101, not a sub-model.")
         n = int(base[1:])
         mid, gid = f"#{n}", f"#{n + 1}"
-        out.append(f"close {mid}-{n + 3}\n")
+        # #n structure, #n+1 geometry, #n+2 bridges; #n+3 only for a hydration-site map,
+        # so water-network scripts are unchanged.
+        out.append(f"close {mid}-{n + 3 if plan.volume else n + 2}\n")
         out.append(f"open {_cxc_quote(s.pdb_path)} id {n}\n")
         # Explicit chain specs, not 'protein'/'solvent' categories: ChimeraX's
         # residue classification varies (e.g. MCPB-renamed metal-site residues).
