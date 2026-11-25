@@ -128,7 +128,7 @@ SECTIONS = {
         ("Input", [
             ("data", "Input data", "open", VIS_INPUT_TYPES, "Step-1 .jsonl for density/frame modes; step-2 cluster file for cluster mode; step-4 hydration-site file for sites mode."),
             ("format", "Viewer", "choice", forms.VISUALIZE_FORMATS, "chimerax writes a .cxc script; chimera/pymol a .py; vmd a .tcl (run with vmd -e)."),
-            ("mode", "Mode", "choice", forms.VISUALIZE_MODES, "cluster: cluster medoids. frame: one frame with its real water molecules. density: every path of every frame. sites: hydration sites (step 4)."),
+            ("mode", "Mode", "choice", forms.VISUALIZE_MODES, "cluster: cluster medoids. frame: one frame with its real water molecules. density: every path of every frame. sites: hydration sites (Hydration sites technique)."),
             ("frame", "Frame", "text", None, "Trajectory frame index (frame mode). Empty = the first frame with water bridges."),
             ("cluster_id", "Cluster ID", "text", None, "Cluster mode: draw a single cluster as real molecules at its medoid frame. Empty = several clusters."),
             ("top_clusters", "Top clusters / sites", "text", None, "Cluster and sites modes: number of most-occupied clusters or sites to draw (empty = all)."),
@@ -176,7 +176,20 @@ HALF_FIELDS = {"stride", "max_depth", "min_depth", "cooperativity", "coarse_cuto
                "max_shell", "shell_cutoff", "site_radius", "min_occupancy"}
 
 STEP_TITLES = {"calculate": "Pathway Analysis", "cluster": "Clustering", "visualize": "Visualization",
-               "hydration": "Hydration Sites"}
+               "hydration": "Site Analysis"}
+
+# The two techniques are separate tools; the sidebar shows the steps of the
+# chosen one, and the shared Visualization step offers only its modes.
+TECHNIQUES = {
+    "network": {"label": "Water networks", "tagline": "Water-bridge network analysis",
+                "stages": ("calculate", "cluster", "visualize"), "modes": ("cluster", "frame", "density")},
+    "hydration": {"label": "Hydration sites", "tagline": "Hydration-site occupancy analysis",
+                  "stages": ("hydration", "visualize"), "modes": ("sites",)},
+}
+VISUALIZE_SUBTITLES = {
+    "network": "Write a ready-to-run water-network scene for ChimeraX, Chimera, PyMOL or VMD.",
+    "hydration": "Draw the hydration sites over the protein in ChimeraX, Chimera, PyMOL or VMD.",
+}
 TAB_TITLES = {s: f"{i}. {t}" for i, (s, t) in enumerate(STEP_TITLES.items(), start=1)}
 STEP_SUBTITLES = {
     "calculate": "Trace water-bridge chains from the root atoms through the trajectory.",
@@ -280,7 +293,7 @@ class GephyraApp:
 
     POLL_MS = 100
 
-    def __init__(self, master, runner=None, theme=None, settings_enabled=True):
+    def __init__(self, master, runner=None, theme=None, settings_enabled=True, technique=None):
         self.master = master
         self.runner = runner or forms.run_stage
         self.queue = queue.Queue()
@@ -303,6 +316,8 @@ class GephyraApp:
         self.widgets = {stage: {} for stage in forms.STAGES}
         self.run_buttons = {}
         self.pages = {}
+        self.subtitles = {}
+        self.visualize_state = {}       # visualize field values per technique
         self.canvases = []
         self.nav_buttons = {}
         self.active_stage = "calculate"
@@ -326,7 +341,8 @@ class GephyraApp:
         self.style.theme_use("clam")
         self._apply_theme()
         self._build()
-        self.show_stage("calculate")
+        chosen = technique or self.settings.get("technique")
+        self.set_technique(chosen if chosen in TECHNIQUES else "network")
         if self.core_fonts_only:
             self._append_log(XFT_HINT, logging.WARNING)
         master.bind("<Control-Return>", lambda _e: self.start(self.active_stage))
@@ -436,6 +452,14 @@ class GephyraApp:
                      lightcolor=p["accent"], darkcolor=p["surface2"], anchor="w", padding=(16, 10),
                      font=f["nav"], focuscolor=p["surface2"])
         st.map("NavActive.TButton", background=[("active", p["surface2"])])
+        st.configure("Seg.TButton", background=p["sidebar"], foreground=p["muted"], bordercolor=p["border"],
+                     lightcolor=p["sidebar"], darkcolor=p["sidebar"], padding=(8, 6), font=f["small"],
+                     focuscolor=p["sidebar"])
+        st.map("Seg.TButton", background=[("active", p["surface2"])], foreground=[("active", p["text"])])
+        st.configure("SegActive.TButton", background=p["accent"], foreground=p["accent_text"], bordercolor=p["accent"],
+                     lightcolor=p["accent"], darkcolor=p["accent"], padding=(8, 6), font=(f["small"][0], f["small"][1], "bold"),
+                     focuscolor=p["accent"])
+        st.map("SegActive.TButton", background=[("active", p["accent_hover"])])
 
         st.configure("Horizontal.TProgressbar", background=p["accent"], troughcolor=p["surface2"],
                      bordercolor=p["bg"], lightcolor=p["accent"], darkcolor=p["accent"], thickness=6)
@@ -490,16 +514,26 @@ class GephyraApp:
         brand.grid(row=0, column=0, sticky="ew", padx=20, pady=(22, 2))
         ttk.Label(brand, text="◆ ", style="BrandAccent.TLabel").pack(side="left")
         ttk.Label(brand, text="Gephyra", style="Brand.TLabel").pack(side="left")
-        ttk.Label(side, text="Water-bridge network analysis", style="SideMuted.TLabel").grid(
-            row=1, column=0, sticky="w", padx=22, pady=(0, 22))
-        ttk.Label(side, text="WORKFLOW", style="SideSection.TLabel").grid(row=2, column=0, sticky="w", padx=22, pady=(0, 6))
-        for i, stage in enumerate(forms.STAGES):
-            b = ttk.Button(side, text=f"{i + 1}    {STEP_TITLES[stage]}", style="Nav.TButton",
-                           command=lambda s=stage: self.show_stage(s))
-            b.grid(row=3 + i, column=0, sticky="ew", padx=10, pady=1)
-            self.nav_buttons[stage] = b
+        self.tagline = ttk.Label(side, text="", style="SideMuted.TLabel")
+        self.tagline.grid(row=1, column=0, sticky="w", padx=22, pady=(0, 18))
+        ttk.Label(side, text="TECHNIQUE", style="SideSection.TLabel").grid(row=2, column=0, sticky="w", padx=22, pady=(0, 6))
+        seg = ttk.Frame(side, style="Sidebar.TFrame")
+        seg.grid(row=3, column=0, sticky="ew", padx=20, pady=(0, 18))
+        self.technique_buttons = {}
+        for name, spec in TECHNIQUES.items():
+            b = ttk.Button(seg, text=spec["label"], style="Seg.TButton", command=lambda n=name: self.set_technique(n))
+            b.pack(side="left", fill="x", expand=True)
+            self.technique_buttons[name] = b
+        _Tooltip(self, seg, "Water networks: water-bridge chains from the root, their channels and scenes. "
+                            "Hydration sites: where waters around the root sit persistently.")
+        ttk.Label(side, text="WORKFLOW", style="SideSection.TLabel").grid(row=4, column=0, sticky="w", padx=22, pady=(0, 6))
+        self.nav_frame = ttk.Frame(side, style="Sidebar.TFrame")
+        self.nav_frame.grid(row=5, column=0, sticky="ew", padx=10)
+        for stage in forms.STAGES:
+            self.nav_buttons[stage] = ttk.Button(self.nav_frame, text=STEP_TITLES[stage], style="Nav.TButton",
+                                                 command=lambda s=stage: self.show_stage(s))
 
-        spacer = 3 + len(forms.STAGES)          # rows below the steps follow it
+        spacer = 6                              # rows below the steps follow it
         side.rowconfigure(spacer, weight=1)
         ttk.Label(side, text="OUTPUT FOLDER", style="SideSection.TLabel").grid(row=spacer + 1, column=0, sticky="w", padx=22, pady=(0, 4))
         self.outdir_label = ttk.Label(side, style="SidePath.TLabel", wraplength=224, justify="left")
@@ -565,7 +599,9 @@ class GephyraApp:
         page.columnconfigure(0, weight=1)
         page.rowconfigure(2, weight=1)
         ttk.Label(page, text=STEP_TITLES[stage], style="Title.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(page, text=STEP_SUBTITLES[stage], style="Subtitle.TLabel").grid(row=1, column=0, sticky="w", pady=(2, 14))
+        subtitle = ttk.Label(page, text=STEP_SUBTITLES[stage], style="Subtitle.TLabel")
+        subtitle.grid(row=1, column=0, sticky="w", pady=(2, 14))
+        self.subtitles[stage] = subtitle
 
         # The card scrolls when the window is too short for the whole form.
         holder = ttk.Frame(page, style="Card.TFrame")
@@ -657,9 +693,47 @@ class GephyraApp:
         return page
 
     def show_stage(self, stage):
+        if stage not in TECHNIQUES[self.technique]["stages"]:
+            self.set_technique(next(n for n, t in TECHNIQUES.items() if stage in t["stages"]), show=False)
         self.active_stage = stage
         self.pages[stage].tkraise()
         self._refresh_nav()
+
+    def set_technique(self, name, show=True):
+        """
+        Shows the steps of one technique (water networks or hydration sites).
+        The Visualization step is shared: it offers only the technique's modes
+        and keeps separate inputs per technique.
+        """
+        spec = TECHNIQUES[name]
+        previous = getattr(self, "technique", None)
+        if previous == name and not show:
+            return
+        if previous != name:
+            # Keep each technique's Visualization inputs apart.
+            if previous is not None:
+                self.visualize_state[previous] = self.values("visualize")
+            state = self.visualize_state.get(name) or dict(forms.DEFAULTS["visualize"], mode=spec["modes"][0])
+            self.widgets["visualize"]["mode"].configure(values=list(spec["modes"]))
+            for field, var in self.vars["visualize"].items():
+                var.set(state.get(field, ""))
+            if self.vars["visualize"]["mode"].get() not in spec["modes"]:
+                self.vars["visualize"]["mode"].set(spec["modes"][0])
+        self.technique = name
+        self.subtitles["visualize"].configure(text=VISUALIZE_SUBTITLES[name])
+        self.tagline.configure(text=spec["tagline"])
+        for button in self.nav_buttons.values():
+            button.pack_forget()
+        for i, stage in enumerate(spec["stages"], start=1):
+            self.nav_buttons[stage].configure(text=f"{i}    {STEP_TITLES[stage]}")
+            self.nav_buttons[stage].pack(fill="x", pady=1)
+        for n, button in self.technique_buttons.items():
+            button.configure(style="SegActive.TButton" if n == name else "Seg.TButton")
+        if self.settings_enabled and previous is not None and previous != name:
+            self.settings["technique"] = name
+            save_settings(self.settings)
+        if show:
+            self.show_stage(spec["stages"][0])
 
     def _refresh_nav(self):
         for stage, b in self.nav_buttons.items():
@@ -677,6 +751,7 @@ class GephyraApp:
         w["frame"].configure(state="normal" if mode == "frame" else "disabled")
         w["cluster_id"].configure(state="normal" if mode == "cluster" else "disabled")
         w["top_clusters"].configure(state="normal" if mode in ("cluster", "sites") else "disabled")
+        w["max_bond_draw_dist"].configure(state="disabled" if mode == "sites" else "normal")
         w["chimerax_model"].configure(state="normal" if v["format"].get() == "chimerax" else "disabled")
         scene = v["with_structure"].get() == "1"
         for name in ("topo", "traj", "context"):
@@ -914,6 +989,8 @@ class GephyraApp:
         for path in files:
             self._append_log(f"Saved: {path}", logging.INFO, tag="success")
         next_action = None
+        if stage in ("calculate", "cluster"):
+            self.set_technique("network", show=False)
         if stage == "calculate":
             out = kwargs["output_file"]
             self.vars["cluster"]["data"].set(out)
@@ -940,6 +1017,7 @@ class GephyraApp:
             body = f"{n} recurring water-bridge channels identified." if n is not None else "Clusters written successfully."
             next_action = ("Next: Visualization  →", lambda: self.show_stage("visualize"))
         elif stage == "hydration":
+            self.set_technique("hydration", show=False)
             out = kwargs["output_file"]
             self.vars["visualize"]["data"].set(out)
             self.vars["visualize"]["mode"].set("sites")

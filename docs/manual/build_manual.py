@@ -206,16 +206,19 @@ def story():
           P("Gephyra finds chains of water molecules that connect a chosen <i>root</i> atom (for example a ligand "
             "oxygen) to the surrounding solvent in a molecular dynamics trajectory, groups the chains that recur "
             "into spatial channels, and writes ready-to-run scenes for molecular viewers."),
-          P("The graphical interface runs the whole workflow in a few steps, without memorising command-line "
-            "options:"),
+          P("It offers two techniques, chosen at the top of the sidebar; each shows its own steps, so the whole "
+            "workflow runs without memorising command-line options."),
+          P("<b>Water networks</b>:"),
           *bullets(["<b>1. Pathway Analysis</b> reads the topology and trajectory and writes every water bridge, "
                     "frame by frame, to a results file (<font face='Courier'>.jsonl</font>).",
                     "<b>2. Clustering</b> groups the bridges that recur in space into channels and writes a "
                     "cluster file (<font face='Courier'>.json</font>).",
                     "<b>3. Visualization</b> writes a script for UCSF ChimeraX, UCSF Chimera, PyMOL or VMD that "
-                    "loads the protein, the ligand and the water network and shows them together.",
-                    "<b>4. Hydration Sites</b> is a separate analysis: it finds the spots around the root where waters "
-                    "sit persistently and reports how often each is occupied; step 3 then draws them."]),
+                    "loads the protein, the ligand and the water network and shows them together."]),
+          P("<b>Hydration sites</b>, a separate analysis:"),
+          *bullets(["<b>1. Site Analysis</b> finds the spots around the root where waters sit persistently and "
+                    "reports how often each is occupied.",
+                    "<b>2. Visualization</b> draws the sites over the protein, sized and coloured by occupancy."]),
           P("Every step shows its progress live, can be cancelled, and ends with a confirmation that lists the files "
             "written and the folder they are in."),
           ]
@@ -260,6 +263,8 @@ def story():
     s += [PageBreak(), H1("3. The window at a glance"),
           screenshot("01_overview.png"),
           table([["Area", "What it does"],
+                 ["Sidebar: technique", "Water networks or Hydration sites. The workflow below shows the steps of the "
+                  "chosen technique; the choice is remembered."],
                  ["Sidebar: workflow", "The steps. Click one to open its form; the current step is highlighted."],
                  ["Sidebar: output folder", "Where all results are saved. <b>Change...</b> picks another folder, "
                   "<b>Open</b> shows it in your file manager."],
@@ -395,7 +400,9 @@ def story():
           screenshot("09_scene_clusters.png"),
           ]
 
-    s += [PageBreak(), H1("7. Step 4 - Hydration Sites"),
+    s += [PageBreak(), H1("7. Hydration sites"),
+          P("Choose <b>Hydration sites</b> under Technique in the sidebar. The workflow then shows two steps: "
+            "<b>1. Site Analysis</b> and <b>2. Visualization</b>."),
           P("A separate analysis, independent of water bridges: where do the waters around the root sit "
             "persistently, and how often? It shows which binding-site waters are structural and which only visit."),
           P("In every analysed frame, Gephyra takes the waters in the first hydrogen-bond shells around the root "
@@ -426,24 +433,24 @@ def story():
               "are typical; values near 1 with long residences are structural waters. If no site passes the "
               "minimum occupancy, the message reports the best one found."),
           P("When it finishes, a confirmation reports how many sites were found and how occupied the best one is. "
-            "<b>Next: Visualization</b> opens step 3 in <b>sites</b> mode: each site is drawn as a sphere sized and "
+            "<b>Next: Visualization</b> opens step 2 in <b>sites</b> mode: each site is drawn as a sphere sized and "
             "coloured by occupancy (red above 0.8, orange, yellow, cyan, blue below 0.2) over the protein, with a "
             "legend and the density map as a surface."),
           ]
 
     s += [PageBreak(), H1("8. Output files"),
           table([["File", "Written by", "Contents"],
-                 ["results.jsonl", "Step 1", "One line per analysed frame with every water bridge (atoms, coordinates, "
+                 ["results.jsonl", "Pathway Analysis", "One line per analysed frame with every water bridge (atoms, coordinates, "
                   "H-quality score), plus the analysed topology/trajectory and settings."],
-                 ["summary.csv", "Step 1 (optional)", "The same paths as a table."],
-                 ["clustered_pathways.json", "Step 2", "The channels: size, occupancy, persistence, H-quality and the "
+                 ["summary.csv", "Pathway Analysis (optional)", "The same paths as a table."],
+                 ["clustered_pathways.json", "Clustering", "The channels: size, occupancy, persistence, H-quality and the "
                   "medoid path of each, plus the analysed system."],
-                 ["name.cxc / .py / .tcl", "Step 3", "The viewer script."],
-                 ["name_structure.pdb", "Step 3", "The protein, ligand and bridging waters loaded by the script."],
-                 ["name.bild, name.pb", "Step 3", "Network geometry and pseudobonds used by the Chimera and ChimeraX "
+                 ["name.cxc / .py / .tcl", "Visualization", "The viewer script."],
+                 ["name_structure.pdb", "Visualization", "The protein, ligand and bridging waters loaded by the script."],
+                 ["name.bild, name.pb", "Visualization", "Network geometry and pseudobonds used by the Chimera and ChimeraX "
                   "scripts."],
-                 ["hydration_sites.json", "Step 4", "The hydration sites with occupancy, residence, shell and contacts."],
-                 ["hydration_map.dx", "Step 4 (optional)", "Water density relative to bulk, for surfaces in viewers."]],
+                 ["hydration_sites.json", "Site Analysis", "The hydration sites with occupancy, residence, shell and contacts."],
+                 ["hydration_map.dx", "Site Analysis (optional)", "Water density relative to bulk, for surfaces in viewers."]],
                 [4.2 * cm, 3.0 * cm, 9.3 * cm]),
           P("H-quality (Z) sums the geometric quality of every route through a channel. It is not a probability and "
             "can exceed 1 for channels with many parallel routes; <i>hquality_norm</i> = Z/(1+Z) is a bounded "

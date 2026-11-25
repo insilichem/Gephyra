@@ -632,10 +632,38 @@ class TestGuiApp(_TmpDir):
         h["traj"].set(self.p("traj.dcd"))
         h["root"].set("resname LIG")
 
-    def test_hydration_is_the_fourth_step(self):
-        self.assertEqual(list(self.app.nav_buttons), ["calculate", "cluster", "visualize", "hydration"])
-        self.app.show_stage("hydration")
+    def _visible_steps(self):
+        return [w.cget("text").split(None, 1)[1] for w in self.app.nav_frame.pack_slaves()]
+
+    def test_technique_switch_shows_its_own_steps(self):
+        self.assertEqual(self.app.technique, "network")
+        self.assertEqual(self._visible_steps(), ["Pathway Analysis", "Clustering", "Visualization"])
+        self.assertEqual(list(self.app.widgets["visualize"]["mode"].cget("values")), ["cluster", "frame", "density"])
+        self.app.set_technique("hydration")
+        self.assertEqual(self._visible_steps(), ["Site Analysis", "Visualization"])
         self.assertEqual(self.app.active_stage, "hydration")
+        self.assertEqual(list(self.app.widgets["visualize"]["mode"].cget("values")), ["sites"])
+        self.assertEqual(self.app.vars["visualize"]["mode"].get(), "sites")
+        self.assertEqual(str(self.app.technique_buttons["hydration"].cget("style")), "SegActive.TButton")
+        self.assertIn("Hydration", self.app.tagline.cget("text"))
+
+    def test_visualization_inputs_are_kept_per_technique(self):
+        self.app.vars["visualize"]["data"].set("network.jsonl")
+        self.app.set_technique("hydration")
+        self.assertEqual(self.app.vars["visualize"]["data"].get(), "")
+        self.app.vars["visualize"]["data"].set("sites.json")
+        self.app.set_technique("network")
+        self.assertEqual(self.app.vars["visualize"]["data"].get(), "network.jsonl")
+        self.app.set_technique("network")                       # re-selecting keeps what was typed
+        self.assertEqual(self.app.vars["visualize"]["data"].get(), "network.jsonl")
+        self.app.set_technique("hydration")
+        self.assertEqual(self.app.vars["visualize"]["data"].get(), "sites.json")
+
+    def test_opening_a_step_selects_its_technique(self):
+        self.app.show_stage("hydration")
+        self.assertEqual(self.app.technique, "hydration")
+        self.app.show_stage("cluster")
+        self.assertEqual(self.app.technique, "network")
 
     def test_hydration_success_prefills_visualization(self):
         self._fill_hydration()

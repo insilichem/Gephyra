@@ -197,7 +197,7 @@ def parse_visualize(values, outdir=""):
     if mode in ("frame", "density") and kind == "cluster":
         raise FormError("data", f"Mode '{mode}' needs the .jsonl from step 1, not a cluster file.")
     if mode == "sites" and kind != "sites":
-        raise FormError("data", "Mode 'sites' needs the hydration-site file from step 4 (Hydration Sites).")
+        raise FormError("data", "Mode 'sites' needs the hydration-site file from Site Analysis (Hydration sites technique).")
     if mode != "sites" and kind == "sites":
         raise FormError("mode", "This is a hydration-site file: choose mode 'sites' to draw it.")
 

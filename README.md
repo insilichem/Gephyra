@@ -155,8 +155,11 @@ gephyra gui        # or: gephyra-gui
 The full walkthrough, with screenshots, is the PDF manual
 [`docs/Gephyra-GUI-Manual.pdf`](docs/Gephyra-GUI-Manual.pdf). In short:
 
-- **Three steps in the sidebar.** **1. Pathway Analysis**, **2. Clustering** and
-  **3. Visualization**. Every command-line option is a form field with the same
+- **Two techniques, each with its own steps.** Choose under *Technique* in the
+  sidebar. *Water networks* shows **1. Pathway Analysis**, **2. Clustering** and
+  **3. Visualization**. *Hydration sites* shows **1. Site Analysis** and
+  **2. Visualization**, where Visualization offers only that technique's modes and
+  keeps its own inputs. The choice is remembered. Every command-line option is a form field with the same
   default (the topology *and* the trajectory are required). Hover over a field
   for help; *Browse* opens a file picker.
 - **Output folder.** Shown in the sidebar and set to the folder Gephyra was
