@@ -56,6 +56,13 @@ def _no_channel_warning(source_metadata, threshold):
             + "; ".join(hints) + ".")
 
 
+def log_metal_roots(root_atoms, consequence):
+    """Says which root atoms were recognised as metals, and what that changes."""
+    from .metals import describe, metal_atoms
+    for atom, symbol in metal_atoms(root_atoms):
+        logger.info(f"Root atom {atom.resname}{atom.resid}:{atom.name} is a metal: {describe(symbol)}; {consequence}.")
+
+
 def coverage_warning(n_frames_with_paths, n_analysed, stride=1, n_trajectory_frames=None,
                      n_discarded=0, min_depth=None):
     """
@@ -515,6 +522,7 @@ def run_analysis(topo_file, traj_file, root_sel, water_sel="resname SOL or resna
 
     if len(root_atoms) == 0:
         raise ValueError(f"Root selection '{root_sel}' returned no atoms. Check your resname/resid.")
+    log_metal_roots(root_atoms, "its first link to a water is scored as a coordination bond")
 
     if len(water_atoms) == 0:
         logger.warning(

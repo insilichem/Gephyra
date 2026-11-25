@@ -297,6 +297,10 @@ def run_hydration_sites(topo_file, traj_file, root_sel, water_sel="resname SOL o
     root = u.select_atoms(root_sel)
     if len(root) == 0:
         raise ValueError(f"Root selection '{root_sel}' returned no atoms. Check your resname/resid.")
+    from .analysis import log_metal_roots
+    from .metals import METALS, metal_atoms
+    log_metal_roots(root, "sites whose waters sit at coordination distance are marked as coordinated")
+    metal_roots = {f"{a.resname}{a.resid}:{a.name}": METALS[sym][2] for a, sym in metal_atoms(root)}
     water = u.select_atoms(water_sel)
     if len(water) == 0:
         raise ValueError(f"Water selection '{water_sel}' returned no atoms. Check the solvent residue names.")
@@ -348,6 +352,13 @@ def run_hydration_sites(topo_file, traj_file, root_sel, water_sel="resname SOL o
                              min_site_distance=min_site_distance, min_occupancy=min_occupancy,
                              grid_spacing=grid_spacing, max_shell=int(max_shell), partners=partners)
     alignment = {"selection": alignment_sel, "reference_frame": frames[0]} if aligner else None
+    # A site is coordinated when its waters' main contact is a metal root
+    # within 0.4 A of the ideal metal-oxygen distance.
+    for site in sites:
+        main = (site.get("contacts") or [{}])[0]
+        ideal = metal_roots.get(main.get("atom"))
+        site["coordinated_to"] = (main["atom"] if ideal is not None and main.get("mean_distance") is not None
+                                  and main["mean_distance"] <= ideal + 0.4 else None)
 
     level = None
     if dx_file and grid is not None:
@@ -362,12 +373,13 @@ def run_hydration_sites(topo_file, traj_file, root_sel, water_sel="resname SOL o
         with open(csv_file, "w", newline="") as f:
             w = csv.writer(f)
             w.writerow(["Site", "X", "Y", "Z", "Occupancy", "Enrichment_vs_bulk", "Mean_residence_frames",
-                        "Max_residence_frames", "Shell", "Main_contact", "Contact_fraction", "Contact_mean_distance"])
+                        "Max_residence_frames", "Shell", "Main_contact", "Contact_fraction", "Contact_mean_distance",
+                        "Coordinated_to"])
             for s in sites:
                 contact = (s.get("contacts") or [{"atom": "", "fraction": "", "mean_distance": ""}])[0]
                 w.writerow([s["site_id"], *s["position"], s["occupancy"], s["enrichment"], s["mean_residence_frames"],
                             s["max_residence_frames"], s["shell"], contact["atom"], contact["fraction"],
-                            contact["mean_distance"]])
+                            contact["mean_distance"], s.get("coordinated_to") or ""])
 
     metadata = {
         "topo_file": os.path.abspath(topo_file), "traj_file": os.path.abspath(traj_file),
@@ -402,7 +414,8 @@ def run_hydration_sites(topo_file, traj_file, root_sel, water_sel="resname SOL o
         logger.info(f"  Site {s['site_id']}: occupancy {s['occupancy']:.2f} ({s['enrichment']:.1f}x bulk), shell "
                     f"{s['shell']}, longest residence {s['max_residence_frames']} frames"
                     + (f", mostly {near.get('mean_distance')} A from {near.get('atom')} "
-                       f"({near.get('fraction', 0):.0%} of the time)" if near else ""))
+                       f"({near.get('fraction', 0):.0%} of the time)" if near else "")
+                    + (f"; coordinated to {s['coordinated_to']}" if s.get("coordinated_to") else ""))
 
     return {
         "output_file": os.path.abspath(output_file),

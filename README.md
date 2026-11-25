@@ -428,6 +428,27 @@ residences indicate structural waters. If nothing passes the threshold, the
 message gives the best occupancy found. Lower `--min_occupancy`, or superpose on
 the ligand if it moves within the pocket.
 
+## Metals as starting points
+
+Both techniques accept a metal as the root, named however the topology names it:
+`--root "resname CU"`, `"name Cu"`, `"name ZN"`, `"resname FE1 and name FE"`.
+Gephyra recognises the metal from the element column or, when the topology
+leaves it empty (common for AMBER/MCPB-parameterised metal centres), from the
+atom or residue name in any case and with charge or number suffixes (`Cu`, `CU`,
+`CU1`, `Zn2+`) or from the atomic mass. Protein and nucleic-acid atoms are
+excluded, so a C-alpha named `CA` is never taken for calcium. The log says which
+root atoms are metals.
+
+- **Water networks:** the first link, from the metal to a water, is a
+  coordination bond, not a hydrogen bond. It is scored on the metal-oxygen
+  distance alone: 1 up to the ideal M-O distance of that metal (e.g. Cu 2.00,
+  Zn 2.09, Mg 2.07, Ca 2.39 Å; from crystal-structure surveys), decaying to 0 at
+  0.6 Å beyond it, with a clash penalty below. The rest of the chain is scored as
+  hydrogen bonds. Results for non-metal roots are unchanged.
+- **Hydration sites:** sites whose waters sit within 0.4 Å of the ideal M-O
+  distance from a metal root are marked `coordinated_to` (also a CSV column).
+- **Scenes:** a single-atom metal root is drawn as a sphere.
+
 ## Solvent naming conventions
 
 The default water selection covers GROMACS (`SOL`), AMBER (`WAT`), and

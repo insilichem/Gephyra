@@ -5,6 +5,7 @@ import networkx as nx
 from MDAnalysis.exceptions import NoDataError
 from MDAnalysis.lib.distances import capped_distance, distance_array
 from .math_utils import calculate_hbond_probability, switching_function
+from .metals import coordination_probability, metal_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -235,9 +236,30 @@ def compute_edge_probabilities(g, u):
             h_cache[atom.index] = []
             return []
 
+    metal_cache = {}
+
+    def metal_of(atom):
+        if atom.index not in metal_cache:
+            metal_cache[atom.index] = metal_symbol(atom)
+        return metal_cache[atom.index]
+
     for u_node, v_node, data in g.edges(data=True):
         a1 = u.atoms[u_node]
         a2 = u.atoms[v_node]
+
+        # A metal starting point is linked to its first water by a coordination
+        # bond, not a hydrogen bond: score it on the metal-oxygen distance alone.
+        m1, m2 = metal_of(a1), metal_of(a2)
+        if m1 or m2:
+            other = a2 if m1 else a1
+            p = coordination_probability(data['dist'], m1 or m2) if not (m1 and m2) and \
+                _get_element(other) in ("O", "N") else 0.0
+            if p <= 0:
+                edges_to_remove.append((u_node, v_node))
+            else:
+                g[u_node][v_node]['prob'] = p
+                g[u_node][v_node]['weight'] = -np.log(p)
+            continue
 
         e1 = _get_element(a1)
         e2 = _get_element(a2)

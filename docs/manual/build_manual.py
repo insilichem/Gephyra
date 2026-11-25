@@ -438,6 +438,16 @@ def story():
             "legend and the density map as a surface."),
           ]
 
+    s += [H2("Metals as starting points"),
+          P("Both techniques accept a metal as the root selection, named as your topology names it, for example "
+            "<font face='Courier'>resname CU</font>, <font face='Courier'>name Zn</font> or "
+            "<font face='Courier'>resname FE1 and name FE</font>. Gephyra recognises the metal even when the "
+            "topology has no element for it (common for parameterised metal centres) and says so in the log. In "
+            "a water network, the first link from the metal to a water is scored as a coordination bond at the "
+            "metal's typical distance (for example 2.0 angstrom for copper) instead of as a hydrogen bond. In a "
+            "hydration-site analysis, sites whose waters coordinate the metal are marked as coordinated."),
+          ]
+
     s += [PageBreak(), H1("8. Output files"),
           table([["File", "Written by", "Contents"],
                  ["results.jsonl", "Pathway Analysis", "One line per analysed frame with every water bridge (atoms, coordinates, "

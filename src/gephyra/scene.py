@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from .metals import metal_symbol
+
 logger = logging.getLogger(__name__)
 
 # Counter-ions are excluded from the default context: they are numerous,
@@ -289,7 +291,10 @@ def write_snapshot(u, frame, out_pdb, root_sel, water_sel, paths=(), context_sel
     spec_safe = re.compile(r"^[A-Za-z0-9_]+$")
     hetero_resnames = sorted({r.resname for r in hetero if spec_safe.match(str(r.resname))})
     metal_resnames = sorted({r.resname for r in hetero if len(_drop_virtual_sites(r.atoms)) == 1
-                             and spec_safe.match(str(r.resname))})
+                             and spec_safe.match(str(r.resname))}
+                            # a single-atom metal root (e.g. a Cu ion) is drawn as a sphere too
+                            | {r.resname for r in root_res.residues if len(_drop_virtual_sites(r.atoms)) == 1
+                               and spec_safe.match(str(r.resname)) and metal_symbol(r.atoms[0])})
     # HETATM records let every viewer recognise them as non-polymer groups.
     hetero_atoms = np.isin(group.indices, np.concatenate([r.atoms.ix for r in hetero] + [root_res.ix]))
     hetero_atoms[offset:] = True
